@@ -122,7 +122,7 @@ test('legacy stored manager field is stripped from reads and later updates',()=>
 test('catalog validates groups and product data',()=>{
   const {inv,catalog}=fixture();
   assert.throws(()=>inv.importShipment({...catalog,groups:['Оригинал','оригинал']}),/уникальными/);
-  assert.throws(()=>inv.importShipment({...catalog,products:[{...catalog.products[0],group:'Нет такой'}]}),/создайте группу/);
+  assert.throws(()=>inv.importShipment({...catalog,products:[{...catalog.products[0],group:'Нет такой'}]}),/категорию/);
   assert.throws(()=>inv.importShipment({...catalog,products:[{...catalog.products[0],stock:-1}]}),/количество/);
   assert.throws(()=>inv.importShipment({...catalog,products:[{...catalog.products[0],image:'javascript:alert(1)'}]}),/изображение/);
 });
