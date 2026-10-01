@@ -18,6 +18,15 @@ export class Inventory {
     sql.exec('CREATE TABLE IF NOT EXISTS order_edits (user_id TEXT NOT NULL, request_key TEXT NOT NULL, fingerprint TEXT NOT NULL, PRIMARY KEY(user_id,request_key))');
     sql.exec('CREATE INDEX IF NOT EXISTS orders_user_status ON orders(user_id,status)');
     sql.exec('CREATE INDEX IF NOT EXISTS orders_shipment_status ON orders(shipment,status)');
+    // Manager assignment was removed from EL Store. Delete its old table and strip legacy order snapshots.
+    sql.exec('DROP TABLE IF EXISTS managers');
+    for(const row of sql.exec('SELECT id,data FROM orders')) {
+      const data=JSON.parse(row.data);
+      if(Object.prototype.hasOwnProperty.call(data,'manager')) {
+        delete data.manager;
+        sql.exec('UPDATE orders SET data=? WHERE id=?',JSON.stringify(data),row.id);
+      }
+    }
   }
   rows(query,...bindings) { return [...this.sql.exec(query,...bindings)]; }
   one(query,...bindings) { return this.rows(query,...bindings)[0]; }
