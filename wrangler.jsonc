@@ -1,0 +1,13 @@
+{
+  "$schema": "https://raw.githubusercontent.com/cloudflare/workers-sdk/main/packages/wrangler/config-schema.json",
+  "name": "el-store",
+  "main": "server/worker.mjs",
+  "compatibility_date": "2026-09-22",
+  "assets": { "directory": "./public", "binding": "ASSETS", "run_worker_first": ["/api/*", "/telegram/webhook"] },
+  "durable_objects": { "bindings": [{ "name": "STORE", "class_name": "NewsletterStore" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["NewsletterStore"] }],
+  "vars": {
+    "BOT_USERNAME": "E_NewSletters_Bot",
+    "MINI_APP_URL": "https://t.me/E_NewSletters_Bot/EL_Store"
+  }
+}
