@@ -30,7 +30,7 @@ async function init(){
     state.preview=config.mode==='preview';state.ready=Boolean(config.notificationReady);
     if(state.preview){state.shipments=(await (await fetch('./data/catalog.json')).json()).shipments;notice('Предпросмотр: условные товары для проверки интерфейса. Отправка заказов отключена.');}
     else{
-      if(!tg?.initData){app.innerHTML=`<div class="empty"><strong>Откройте приложение в Telegram</strong>Ваши заказы привязаны к Telegram-аккаунту.<p><a class="primary" href="https://t.me/EL_Store_Bot">Открыть EL Store</a></p></div>`;return;}
+      if(!tg?.initData){app.innerHTML=`<div class="empty"><strong>Откройте приложение в Telegram</strong>Ваши заказы привязаны к Telegram-аккаунту.<p><a class="primary" href="https://t.me/E_NewSletters_Bot">Открыть EL Store</a></p></div>`;return;}
       const me=await api('/me');state.admin=me.admin;state.user=me.user;
       state.shipments=(await api('/catalog')).shipments;
       $('#admin-tab').hidden=!state.admin;
@@ -247,12 +247,12 @@ async function editManagers(){
   };
 }
 function showBotSetup(){
-  showDialog('Подключение бота',`<p>Подключим команды бота и кнопку открытия поступлений.</p><p>Затем добавьте @EL_Store_Bot администратором рабочего канала с правом публикации и перешлите ему сообщение из этого канала. Бот ответит ID канала для настройки уведомлений.</p><p id="bot-setup-error" class="error" role="alert"></p><button class="primary full" id="connect-bot">Подключить</button>`);
+  showDialog('Подключение бота',`<p>Подключим команды бота и кнопку открытия поступлений.</p><p>Затем добавьте @E_NewSletters_Bot администратором рабочего канала с правом публикации и перешлите ему сообщение из этого канала. Бот ответит ID канала для настройки уведомлений.</p><p id="bot-setup-error" class="error" role="alert"></p><button class="primary full" id="connect-bot">Подключить</button>`);
   $('#connect-bot').onclick=async()=>{
     const button=$('#connect-bot'),error=$('#bot-setup-error');button.disabled=true;button.textContent='Подключаем…';error.textContent='';
     try{
       await api('/admin/setup-bot','POST',{});
-      showDialog('Бот подключён',`<p>Добавьте @EL_Store_Bot администратором рабочего канала с правом публикации сообщений.</p><p>Перешлите сообщение из канала в личный чат с ботом, сохранив источник пересылки. Полученный ID укажите в Cloudflare как Secret <strong>ORDER_CHAT_ID</strong>, сохраните и переоткройте приложение.</p><p><a class="primary" href="https://t.me/EL_Store_Bot" target="_blank" rel="noopener">Открыть бота</a></p>`);
+      showDialog('Бот подключён',`<p>Добавьте @E_NewSletters_Bot администратором рабочего канала с правом публикации сообщений.</p><p>Перешлите сообщение из канала в личный чат с ботом, сохранив источник пересылки. Полученный ID укажите в Cloudflare как Secret <strong>ORDER_CHAT_ID</strong>, сохраните и переоткройте приложение.</p><p><a class="primary" href="https://t.me/E_NewSletters_Bot" target="_blank" rel="noopener">Открыть бота</a></p>`);
     }catch(e){error.textContent=e.message;button.disabled=false;button.textContent='Повторить подключение';}
   };
 }
