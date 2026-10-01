@@ -212,7 +212,7 @@ test('confirmed orders require admin edits; closed shipments and cancelled order
   const cancelled=inv.changeOrder(user,r.id,'cancelled',true);
   assert.throws(()=>inv.editOrder(user,r.id,editInput(cancelled,[{id:'p1',quantity:1}]),true),/нельзя изменить/);
   const other=inv.placeOrder(user,request('open'));inv.importShipment({...shipment,status:'closed'});
-  assert.throws(()=>inv.editOrder(user,other.id,editInput(other,[{id:'p1',quantity:1}])),/поступления закрыто/);
+  assert.throws(()=>inv.editOrder(user,other.id,editInput(other,[{id:'p1',quantity:1}])),/каталога закрыто/);
 });
 test('failed edit notification transaction rolls back stock, order and retry key',()=>{
   const {inv}=fixture();const r=inv.placeOrder(user,request('first'));
