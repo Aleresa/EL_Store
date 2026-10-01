@@ -11,9 +11,11 @@ Telegram Mini App **EL Store** для товаров в наличии. Осно
 - отправка и обновление заказа в рабочем Telegram-канале;
 - отдельное хранилище EL Store без пересечения с CR_Newsletters.
 
-## Telegram
+## Адреса
 
-Mini App: https://t.me/E_NewSletters_Bot/EL_Store
+Web App: https://el-store.elereas.workers.dev
+
+Telegram Mini App: https://t.me/E_NewSletters_Bot/EL_Store
 
 ## Цвета
 
