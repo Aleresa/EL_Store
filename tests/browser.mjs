@@ -1,4 +1,4 @@
-// Browser smoke test for the EL Store retail catalog.
+// Browser smoke test for EL Store: Brand -> Category -> Products.
 import {chromium} from 'playwright';
 import JSZip from 'jszip';
 import {DatabaseSync} from 'node:sqlite';
@@ -60,41 +60,38 @@ try{
   await page.waitForSelector('.brand-card');
   assert.equal(await page.locator('.brand-card').count(),3);
   assert.deepEqual(await page.locator('.brand-name').allTextContents(),['Apple','Remax','Gurdini']);
+  assert.equal(await page.locator('[data-view="shipments"]').textContent(),'Товары');
+  assert.equal(await page.locator('#admin-tab').textContent(),'Управление');
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
-  await page.screenshot({path:'test-results/mobile-brands.png',fullPage:true});
 
-  // Configure managers.
-  await page.locator('#admin-tab').click();
-  await page.locator('#managers').click();
-  await page.waitForSelector('[data-manager-name]');
-  await page.locator('[data-manager-name]').first().fill('Анна');
-  await page.locator('[data-manager-username]').first().fill('@anna_test');
-  await page.locator('#add-manager').click();
-  await page.locator('[data-manager-name]').last().fill('Иван');
-  await page.locator('[data-manager-username]').last().fill('@ivan_test');
-  await page.locator('#managers-form button[type="submit"]').click();
-  await page.waitForSelector('#managers-form',{state:'hidden'});
-  assert.equal(store.inventory.managers().length,2);
-
-  // Buy one Apple item.
-  await page.locator('[data-view="shipments"]').click();
+  // Apple -> Оригинал / Копия -> products.
   await page.locator('[data-brand="apple"]').click();
+  await page.waitForSelector('.category-card');
+  assert.deepEqual(await page.locator('[data-category]').allTextContents(),['Оригинал10 товаров→','Копия8 товаров→'].map(()=>null).filter(Boolean));
+  assert.deepEqual(await page.locator('[data-category] strong').allTextContents(),['Оригинал','Копия']);
+  await page.locator('[data-category="Оригинал"]').click();
   await page.waitForSelector('[data-product="MM0A3"]');
+  assert.equal(await page.locator('[data-product]').count(),1);
   assert.equal(await page.locator('#product-search').count(),1);
+
+  // Checkout has no manager selector.
   await page.locator('[data-step="1"][data-id="MM0A3"]').click();
-  assert.notEqual(await page.locator('[data-line-total="MM0A3"]').textContent(),'0 ₽');
   await page.locator('#open-cart').click();
-  await page.waitForSelector('#placeOrder-manager');
-  assert.equal(await page.locator('#submit-placeOrder').isDisabled(),true);
-  await page.locator('#placeOrder-manager').selectOption({label:'Иван'});
+  assert.equal(await page.locator('#placeOrder-manager').count(),0);
+  assert.equal(await page.locator('#submit-placeOrder').isDisabled(),false);
   await page.locator('#submit-placeOrder').click();
   await page.waitForSelector('.order');
   const order=store.inventory.orders({id:'123'})[0];
-  assert.equal(order.manager.username,'ivan_test');
-  assert.equal(store.inventory.catalog().find(c=>c.id==='apple').products.find(p=>p.id==='MM0A3').stock,9);
+  assert.equal('manager' in order,false);
+  assert.equal(order.lines[0].id,'MM0A3');
 
-  // Upload a fresh Apple Excel: update price/stock, add one SKU, omit MQGH2.
+  // Admin contains no manager controls and shows canonical category names.
   await page.locator('#admin-tab').click();
+  assert.equal(await page.locator('#managers').count(),0);
+  const adminText=await page.locator('.admin-panel').textContent();
+  for(const name of ['Оригинал','Копия','GL-27','GL-27 Privacy','ES-01','Стекла','Чехлы','Аккумуляторы'])assert(adminText.includes(name));
+
+  // Update Apple from Excel. Existing SKU keeps category, new SKU requires a fixed category.
   await page.locator('[data-brand-import="apple"]').click();
   const rows=[
     ['Наименование','Код','Доступно','Цена продажи'],
@@ -102,42 +99,42 @@ try{
     ['Новый Apple кабель','APP-NEW','5','500']
   ];
   await page.locator('#xlsx-file').setInputFiles({name:'Apple.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:await supplierXlsx(rows)});
-  await page.waitForSelector('#add-product-group');
-  await page.locator('#new-product-group').fill('Кабели');
-  await page.locator('#add-product-group').click();
-  await page.locator('[data-product-group="MM0A3"]').selectOption('Кабели');
-  await page.locator('[data-product-group="APP-NEW"]').selectOption('Кабели');
+  await page.waitForSelector('[data-product-category="MM0A3"]');
+  assert.equal(await page.locator('[data-product-category="MM0A3"]').inputValue(),'Оригинал');
+  assert.equal(await page.locator('[data-product-category="APP-NEW"]').inputValue(),'');
+  await page.locator('[data-product-category="APP-NEW"]').selectOption('Копия');
   if(await page.locator('#accept-warnings').count())await page.locator('#accept-warnings').check();
   await page.locator('#save-shipment').click();
   await page.waitForSelector('#shipment-form',{state:'hidden'});
 
-  const adminApple=store.inventory.catalog(true).find(c=>c.id==='apple');
-  assert.equal(adminApple.products.find(p=>p.id==='MM0A3').stock,20);
-  assert.equal(adminApple.products.find(p=>p.id==='MM0A3').price,95000);
-  assert.equal(adminApple.products.find(p=>p.id==='MQGH2').hidden,true);
-  assert.equal(adminApple.products.find(p=>p.id==='MQGH2').stock,0);
-  assert.deepEqual(store.inventory.catalog().find(c=>c.id==='apple').products.map(p=>p.id),['MM0A3','APP-NEW']);
+  const apple=store.inventory.catalog(true).find(c=>c.id==='apple');
+  assert.equal(apple.products.find(p=>p.id==='MM0A3').price,95000);
+  assert.equal(apple.products.find(p=>p.id==='MM0A3').group,'Оригинал');
+  assert.equal(apple.products.find(p=>p.id==='APP-NEW').group,'Копия');
+  assert.equal(apple.products.find(p=>p.id==='APPLE-COPY-1').hidden,true);
 
-  // Filters and compact product list remain available.
+  // Remax fixed categories.
   await page.locator('[data-view="shipments"]').click();
-  await page.locator('[data-brand="apple"]').click();
-  await page.waitForSelector('#product-group');
-  assert.deepEqual(await page.locator('.group-heading h2').allTextContents(),['Кабели']);
-  await page.locator('#product-search').fill('APP-NEW');
-  await page.waitForSelector('[data-product="APP-NEW"]');
-  assert.equal(await page.locator('[data-product]').count(),1);
-  await page.locator('#product-search').fill('');
-  await page.locator('#product-group').selectOption('Кабели');
-  assert.equal(await page.locator('[data-product]').count(),2);
+  await page.locator('[data-brand="remax"]').click();
+  assert.deepEqual(await page.locator('[data-category] strong').allTextContents(),['GL-27','GL-27 Privacy','ES-01']);
+  await page.locator('[data-category="GL-27 Privacy"]').click();
+  await page.waitForSelector('[data-product="GL27P-DEMO"]');
+
+  // Back to categories, then brands, then Gurdini.
+  await page.locator('#back').click();
+  assert.deepEqual(await page.locator('[data-category] strong').allTextContents(),['GL-27','GL-27 Privacy','ES-01']);
+  await page.locator('#back').click();
+  await page.locator('[data-brand="gurdini"]').click();
+  assert.deepEqual(await page.locator('[data-category] strong').allTextContents(),['Стекла','Чехлы','Аккумуляторы']);
+  await page.locator('[data-category="Чехлы"]').click();
+  await page.waitForSelector('[data-product="G-CASE"]');
 
   await page.setViewportSize({width:1440,height:1000});
-  await page.locator('#back').click();
-  await page.waitForSelector('.brand-card');
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
-  await page.screenshot({path:'test-results/desktop-brands.png',fullPage:true});
+  await page.screenshot({path:'test-results/store-categories.png',fullPage:true});
 
   assert.deepEqual(errors,[]);
-  console.log('Browser checks passed: brands, orders, live Excel stock, hidden missing SKUs and filters.');
+  console.log('Browser checks passed: brand categories, product drill-down, checkout without managers, Excel category assignment.');
 }finally{
   await browser?.close();
   await new Promise(resolve=>server.close(resolve));
