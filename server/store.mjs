@@ -44,7 +44,7 @@ export class Inventory {
       const products=this.rows('SELECT * FROM products WHERE shipment=? ORDER BY rowid',s.id).map((row,index)=>{
         const {subgroup,group,...p}=JSON.parse(row.data);
         return {...p,group:groups.find(g=>groupKey(g)===groupKey(group))||'',position:p.position??index,stock:row.total-row.placed,...(admin?{total:row.total,placed:row.placed}:{})};
-      }).sort((a,b)=>a.position-b.position);
+      }).filter(p=>admin || (!p.hidden && p.stock>0)).sort((a,b)=>a.position-b.position);
       return {...s,groups,products};
     });
   }
@@ -73,8 +73,8 @@ export class Inventory {
       publishedAt:input.publishedAt || previous?.publishedAt || (input.status === 'draft'?null:new Date().toISOString().slice(0,10))};
     const ids = new Set();
     const products = input.products.map((p,position)=>{
-      const total=p.total ?? p.stock;
-      if (!validId(p.id) || ids.has(p.id) || !trim(p.name,500) || !Number.isSafeInteger(total) || total<0 || total>10000000 || !Number.isSafeInteger(p.price) || p.price<0 || p.price>100000000) throw new ApiError(400,'В товарах есть некорректный артикул, количество, цена или дубликат.');
+      const stock=p.stock ?? p.total;
+      if (!validId(p.id) || ids.has(p.id) || !trim(p.name,500) || !Number.isSafeInteger(stock) || stock<0 || stock>10000000 || !Number.isSafeInteger(p.price) || p.price<0 || p.price>100000000) throw new ApiError(400,'В товарах есть некорректный артикул, количество, цена или дубликат.');
       ids.add(p.id);
       if (p.image && (!/^data:image\/(webp|png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(p.image) || p.image.length>180000)) throw new ApiError(400,'Некорректное изображение.');
       if (p.imageKey && !/^[a-zA-Z0-9_-]+\/[a-zA-Z0-9_-]+$/.test(p.imageKey)) throw new ApiError(400,'Некорректное изображение.');
@@ -82,19 +82,22 @@ export class Inventory {
       const group=input.groupingMode==='manual'?trim(p.group,80):'';
       const groupName=groupNames.find(g=>groupKey(g)===groupKey(group));
       if(group&&!groupName)throw new ApiError(400,'Сначала создайте группу для товара.');
-      return {id:p.id,sku:trim(p.sku || p.id,80),name:trim(p.name,500),group:groupName||'',position,price:p.price,unit:trim(p.unit || 'шт',20),image:p.image || null,imageKey:p.imageKey || null,total};
+      return {id:p.id,sku:trim(p.sku || p.id,80),name:trim(p.name,500),group:groupName||'',position,price:p.price,unit:trim(p.unit || 'шт',20),image:p.image || null,imageKey:p.imageKey || null,stock};
     });
     return this.transaction(()=>{
-      const current=this.rows('SELECT id,placed FROM products WHERE shipment=?',shipment.id);
-      for(const p of current) if(p.placed && !ids.has(p.id)) throw new ApiError(409,'Нельзя удалить товар с действующими заказами.');
+      const current=this.rows('SELECT id,placed,total,data FROM products WHERE shipment=?',shipment.id);
       const byId=new Map(current.map(p=>[p.id,p]));
-      for(const p of products) {
-        const existing=byId.get(p.id);
-        if((existing?.placed || 0)>p.total) throw new ApiError(409,`${p.sku}: количество меньше уже оформленного в заказах.`);
-      }
       this.sql.exec('INSERT INTO shipments(id,data) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data',shipment.id,JSON.stringify(shipment));
-      for(const p of products) this.sql.exec('INSERT INTO products(shipment,id,data,total) VALUES(?,?,?,?) ON CONFLICT(shipment,id) DO UPDATE SET data=excluded.data,total=excluded.total',shipment.id,p.id,JSON.stringify(p),p.total);
-      for(const p of current) if(!ids.has(p.id)) this.sql.exec('DELETE FROM products WHERE shipment=? AND id=?',shipment.id,p.id);
+      for(const p of products) {
+        const existing=byId.get(p.id),placed=existing?.placed||0,total=p.stock+placed;
+        const stored={...p,hidden:false};
+        this.sql.exec('INSERT INTO products(shipment,id,data,total) VALUES(?,?,?,?) ON CONFLICT(shipment,id) DO UPDATE SET data=excluded.data,total=excluded.total',shipment.id,p.id,JSON.stringify(stored),total);
+      }
+      for(const row of current) if(!ids.has(row.id)) {
+        const previous=JSON.parse(row.data);
+        const hidden={...previous,hidden:true,stock:0};
+        this.sql.exec('UPDATE products SET data=?,total=? WHERE shipment=? AND id=?',JSON.stringify(hidden),row.placed,shipment.id,row.id);
+      }
       return shipment;
     });
   }
