@@ -17,27 +17,9 @@ export class Inventory {
     sql.exec('CREATE TABLE IF NOT EXISTS order_edits (user_id TEXT NOT NULL, request_key TEXT NOT NULL, fingerprint TEXT NOT NULL, PRIMARY KEY(user_id,request_key))');
     sql.exec('CREATE INDEX IF NOT EXISTS orders_user_status ON orders(user_id,status)');
     sql.exec('CREATE INDEX IF NOT EXISTS orders_shipment_status ON orders(shipment,status)');
-    sql.exec('CREATE TABLE IF NOT EXISTS managers (id TEXT PRIMARY KEY, data TEXT NOT NULL)');
   }
   rows(query,...bindings) { return [...this.sql.exec(query,...bindings)]; }
   one(query,...bindings) { return this.rows(query,...bindings)[0]; }
-  managers() { return this.rows('SELECT data FROM managers ORDER BY rowid').map(r=>JSON.parse(r.data)); }
-  saveManagers(input) {
-    if(!Array.isArray(input.managers) || input.managers.length>100) throw new ApiError(400,'Допустимо не больше 100 менеджеров.');
-    const ids=new Set(),usernames=new Set();
-    const managers=input.managers.map(m=>{
-      if(!m || typeof m!=='object') throw new ApiError(400,'Проверьте список менеджеров.');
-      const name=trim(m.name,80),username=trim(m.username,80).replace(/^@/,'');
-      if(!validId(m.id) || ids.has(m.id) || !name || /[\r\n]/.test(name) || !/^[A-Za-z][A-Za-z0-9_]{0,31}$/.test(username) || usernames.has(username.toLowerCase())) throw new ApiError(400,'Укажите имя и уникальный Telegram-ник менеджера, например @manager_name.');
-      ids.add(m.id);usernames.add(username.toLowerCase());
-      return {id:m.id,name,username};
-    });
-    return this.transaction(()=>{
-      this.sql.exec('DELETE FROM managers');
-      for(const m of managers)this.sql.exec('INSERT INTO managers(id,data) VALUES(?,?)',m.id,JSON.stringify(m));
-      return managers;
-    });
-  }
   catalog(admin=false) {
     return this.rows('SELECT data FROM shipments').map(r=>JSON.parse(r.data)).filter(s=>admin || s.status !== 'draft').map(s=>{
       const groups=s.groupingMode==='manual'?(s.groups||[]):[];
@@ -123,16 +105,14 @@ export class Inventory {
       seen.add(l.id); return {id:l.id,quantity:l.quantity};
     }).sort((a,b)=>a.id.localeCompare(b.id));
     const comment=trim(input.comment,1000);
-    if(input.managerId!==undefined && !validId(input.managerId)) throw new ApiError(400,'Выберите менеджера.');
-    const fingerprint=JSON.stringify({shipment:input.shipmentId,lines,comment,...(input.managerId?{managerId:input.managerId}:{})});
+    const fingerprint=JSON.stringify({shipment:input.shipmentId,lines,comment});
     return this.transaction(()=>{
       const previous=this.one('SELECT * FROM orders WHERE user_id=? AND request_key=?',user.id,input.requestKey);
       if(previous) {
         if(previous.fingerprint!==fingerprint) throw new ApiError(409,'Повтор запроса с другим содержимым.');
-        return {...JSON.parse(previous.data),status:previous.status,repeated:true};
+        const {manager,...data}=JSON.parse(previous.data);
+        return {...data,status:previous.status,repeated:true};
       }
-      const manager=this.managers().find(m=>m.id===input.managerId);
-      if(!manager) throw new ApiError(400,'Выберите менеджера из актуального списка. Если список пуст, обратитесь в магазин.');
       const shipmentRow=this.one('SELECT data FROM shipments WHERE id=?',input.shipmentId);
       const shipment=shipmentRow && JSON.parse(shipmentRow.data);
       if(!shipment || !ACTIVE.has(shipment.status)) throw new ApiError(409,'Заказы по этому каталогу закрыты.');
@@ -140,10 +120,11 @@ export class Inventory {
         const row=this.one('SELECT * FROM products WHERE shipment=? AND id=?',input.shipmentId,l.id);
         if(!row) throw new ApiError(409,'Товар больше не доступен.');
         const product=JSON.parse(row.data);
+        if(product.hidden) throw new ApiError(409,'Товар больше не доступен.');
         if(row.total-row.placed<l.quantity) throw new ApiError(409,`${product.sku}: свободно ${row.total-row.placed} шт. Обновите количество.`);
         return {id:l.id,sku:product.sku,name:product.name,quantity:l.quantity,price:product.price};
       });
-      const data={id:crypto.randomUUID(),shipmentId:shipment.id,shipmentTitle:shipment.title,user,manager,lines:detailed,comment,status:'placed',revision:1,createdAt:new Date().toISOString(),total:detailed.reduce((s,l)=>s+l.price*l.quantity,0)};
+      const data={id:crypto.randomUUID(),shipmentId:shipment.id,shipmentTitle:shipment.title,user,lines:detailed,comment,status:'placed',revision:1,createdAt:new Date().toISOString(),total:detailed.reduce((sum,l)=>sum+l.price*l.quantity,0)};
       if(!Number.isSafeInteger(data.total)) throw new ApiError(400,'Слишком большая сумма.');
       for(const l of detailed) this.sql.exec('UPDATE products SET placed=placed+? WHERE shipment=? AND id=?',l.quantity,shipment.id,l.id);
       this.sql.exec('INSERT INTO orders(id,user_id,request_key,fingerprint,shipment,status,data) VALUES(?,?,?,?,?,?,?)',data.id,user.id,input.requestKey,fingerprint,shipment.id,data.status,JSON.stringify(data));
@@ -162,16 +143,16 @@ export class Inventory {
     return this.transaction(()=>{
       const row=this.one('SELECT * FROM orders WHERE id=?',id);
       if(!row || (!admin && row.user_id!==user.id)) throw new ApiError(404,'Заказ не найден.');
-      const previous=JSON.parse(row.data),revision=previous.revision||1;
+      const storedPrevious=JSON.parse(row.data),{manager:legacyManager,...previous}=storedPrevious,revision=previous.revision||1;
       const retry=this.one('SELECT fingerprint FROM order_edits WHERE user_id=? AND request_key=?',user.id,input.requestKey);
       if(retry){
         if(retry.fingerprint!==fingerprint) throw new ApiError(409,'Повтор запроса с другим содержимым.');
         return {...previous,status:row.status,repeated:true};
       }
-      if(row.status==='cancelled' || (!admin && row.status==='confirmed')) throw new ApiError(409,'Этот заказ нельзя изменить. Для подтверждённого заказа обратитесь к менеджеру.');
+      if(row.status==='cancelled' || (!admin && row.status==='confirmed')) throw new ApiError(409,'Этот заказ нельзя изменить. Для подтверждённого заказа обратитесь в магазин.');
       if(revision!==input.expectedRevision) throw new ApiError(409,'Заказ уже изменён. Обновите список заказов и откройте его заново.');
       const shipmentRow=this.one('SELECT data FROM shipments WHERE id=?',row.shipment);
-      if(!shipmentRow || (!admin && !ACTIVE.has(JSON.parse(shipmentRow.data).status))) throw new ApiError(409,'Изменение этого каталога закрыто. Обратитесь к менеджеру.');
+      if(!shipmentRow || (!admin && !ACTIVE.has(JSON.parse(shipmentRow.data).status))) throw new ApiError(409,'Изменение этого каталога закрыто. Обратитесь в магазин.');
       const old=new Map(previous.lines.map(l=>[l.id,l]));
       const detailed=lines.map(l=>{
         const productRow=this.one('SELECT * FROM products WHERE shipment=? AND id=?',row.shipment,l.id);
@@ -197,17 +178,17 @@ export class Inventory {
   }
   orders(user,admin=false) {
     const rows=admin?this.rows('SELECT * FROM orders ORDER BY rowid DESC LIMIT 1000'):this.rows("SELECT * FROM orders WHERE user_id=? AND status!='cancelled' ORDER BY rowid DESC LIMIT 1000",user.id);
-    return rows.map(r=>({...JSON.parse(r.data),status:r.status}));
+    return rows.map(r=>{const {manager,...data}=JSON.parse(r.data);return {...data,status:r.status};});
   }
   changeOrder(user,id,status,admin=false,expectedRevision) {
     if(!['cancelled','confirmed'].includes(status) || (!admin && status!=='cancelled')) throw new ApiError(403,'Недостаточно прав.');
     return this.transaction(()=>{
       const row=this.one('SELECT * FROM orders WHERE id=?',id);
       if(!row || (!admin && row.user_id!==user.id)) throw new ApiError(404,'Заказ не найден.');
-      const data=JSON.parse(row.data);
+      const stored=JSON.parse(row.data),{manager:legacyManager,...data}=stored;
       if(row.status===status) return {...data,status};
       if(expectedRevision!==undefined && expectedRevision!==(data.revision||1)) throw new ApiError(409,'Заказ уже изменён. Обновите список заказов.');
-      if(row.status==='cancelled' || (!admin && row.status==='confirmed')) throw new ApiError(409,'Для изменения подтверждённого заказа свяжитесь с менеджером.');
+      if(row.status==='cancelled' || (!admin && row.status==='confirmed')) throw new ApiError(409,'Для изменения подтверждённого заказа свяжитесь с магазином.');
       if(status==='cancelled') for(const l of data.lines) this.sql.exec('UPDATE products SET placed=placed-? WHERE shipment=? AND id=?',l.quantity,data.shipmentId,l.id);
       const updated={...data,status,revision:(data.revision||1)+1};
       this.sql.exec('UPDATE orders SET status=?,data=? WHERE id=?',status,JSON.stringify(updated),id);
@@ -218,10 +199,10 @@ export class Inventory {
   notificationText(data) {
     const name=data.status==='cancelled'?'Заказ отменён':data.status==='confirmed'?'Заказ подтверждён':data.editedAt?'Заказ изменён':'Новый заказ';
     const who=`${data.user.name}${data.user.username?' @'+data.user.username:''} (ID ${data.user.id})`;
-    return `${name} №${data.id}${data.manager?'\nМенеджер: '+data.manager.name+' @'+data.manager.username:''}\nКлиент: ${who}\nБренд: ${data.shipmentTitle}${data.editedAt?'\nИзменён: '+data.editedAt.replace('T',' ').slice(0,19)+' UTC':''}\n\n${data.lines.map(l=>`${l.sku} · ${l.name}\n${l.quantity} шт. × ${(l.price/100).toFixed(2)} ₽`).join('\n\n')}\n\nИтого: ${(data.total/100).toFixed(2)} ₽${data.comment?'\nКомментарий: '+data.comment:''}`;
+    return `${name} №${data.id}\nКлиент: ${who}\nБренд: ${data.shipmentTitle}${data.editedAt?'\nИзменён: '+data.editedAt.replace('T',' ').slice(0,19)+' UTC':''}\n\n${data.lines.map(l=>`${l.sku} · ${l.name}\n${l.quantity} шт. × ${(l.price/100).toFixed(2)} ₽`).join('\n\n')}\n\nИтого: ${(data.total/100).toFixed(2)} ₽${data.comment?'\nКомментарий: '+data.comment:''}`;
   }
   enqueue(data,event) {
     const text=this.notificationText(data);
-    this.sql.exec('INSERT OR IGNORE INTO outbox(id,data) VALUES(?,?)',`${data.id}:v${data.revision||1}:${event}`,JSON.stringify({orderId:data.id,text,kind:'manager'}));
+    this.sql.exec('INSERT OR IGNORE INTO outbox(id,data) VALUES(?,?)',`${data.id}:v${data.revision||1}:${event}`,JSON.stringify({orderId:data.id,text,kind:'order'}));
   }
 }
