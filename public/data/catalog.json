@@ -1,1 +1,82 @@
-{"shipments":[{"id":"demo","title":"Пример поступления","brand":"ДЕМО","description":"Условные товары для знакомства с интерфейсом. Это не предложение о продаже.","status":"arrived","publishedAt":null,"eta":null,"products":[{"id":"DEMO-1","sku":"DEMO-1","name":"Пример товара — кабель USB-C","stock":10,"price":10000,"unit":"шт"},{"id":"DEMO-2","sku":"DEMO-2","name":"Пример товара — защитный чехол","stock":5,"price":20000,"unit":"шт"}]}]}
+{
+  "shipments": [
+    {
+      "id": "apple",
+      "title": "Apple",
+      "brand": "Apple",
+      "description": "",
+      "status": "arrived",
+      "stockMode": "live",
+      "publishedAt": null,
+      "eta": null,
+      "groupingMode": "manual",
+      "groups": [],
+      "products": [
+        {
+          "id": "MM0A3",
+          "sku": "MM0A3",
+          "name": "Оригинальный кабель Lightning to USB-C 1 м",
+          "stock": 10,
+          "price": 90000,
+          "unit": "шт",
+          "image": null
+        },
+        {
+          "id": "MQGH2",
+          "sku": "MQGH2",
+          "name": "Оригинальный кабель Lightning to USB-C 2 м",
+          "stock": 8,
+          "price": 100000,
+          "unit": "шт",
+          "image": null
+        }
+      ]
+    },
+    {
+      "id": "remax",
+      "title": "Remax",
+      "brand": "Remax",
+      "description": "",
+      "status": "arrived",
+      "stockMode": "live",
+      "publishedAt": null,
+      "eta": null,
+      "groupingMode": "manual",
+      "groups": [],
+      "products": [
+        {
+          "id": "REMAX-DEMO",
+          "sku": "REMAX-DEMO",
+          "name": "Пример товара Remax",
+          "stock": 12,
+          "price": 75000,
+          "unit": "шт",
+          "image": null
+        }
+      ]
+    },
+    {
+      "id": "gurdini",
+      "title": "Gurdini",
+      "brand": "Gurdini",
+      "description": "",
+      "status": "arrived",
+      "stockMode": "live",
+      "publishedAt": null,
+      "eta": null,
+      "groupingMode": "manual",
+      "groups": [],
+      "products": [
+        {
+          "id": "GURDINI-DEMO",
+          "sku": "GURDINI-DEMO",
+          "name": "Пример товара Gurdini",
+          "stock": 6,
+          "price": 120000,
+          "unit": "шт",
+          "image": null
+        }
+      ]
+    }
+  ]
+}
