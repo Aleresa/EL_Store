@@ -8,7 +8,11 @@ const esc=s=>String(s??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replac
 const moneyFormats=[0,2].map(maximumFractionDigits=>new Intl.NumberFormat('ru-RU',{style:'currency',currency:'RUB',maximumFractionDigits}));
 const money=n=>moneyFormats[n%100?1:0].format(n/100);
 const date=s=>s?new Date(s.length===10?s+'T12:00:00':s).toLocaleDateString('ru-RU',{day:'numeric',month:'long'}):'Дата не указана';
-const statuses={draft:'Черновик',arrived:'В продаже',closed:'Продажа закрыта',placed:'Оформлен',confirmed:'Подтверждён',cancelled:'Отменён'};
+const statuses={draft:'Скрыт',arrived:'В продаже',closed:'Продажа закрыта',placed:'Оформлен',confirmed:'Подтверждён',cancelled:'Отменён'};
+const BRANDS=[{id:'apple',name:'Apple'},{id:'remax',name:'Remax'},{id:'gurdini',name:'Gurdini'}];
+const brandById=id=>BRANDS.find(b=>b.id===id);
+const catalogForBrand=id=>{const b=brandById(id);return state.shipments.find(s=>s.id===id)||(b&&state.shipments.find(s=>String(s.brand||s.title).toLowerCase()===b.name.toLowerCase()));};
+const sellableProducts=catalog=>(catalog?.products||[]).filter(p=>!p.hidden&&p.stock>0);
 const state={preview:false,admin:false,ready:false,view:'shipments',shipments:[],current:null,filter:'all',sort:'new',search:'',cart:{},images:{},orders:[],requestKey:null,managers:[],managerId:null,productGroup:''};
 let toastTimer,refreshPromise,importController;
 const imageRequests=new Map();
@@ -54,7 +58,12 @@ function photo(p,cls='product-photo'){
   return `<img class="${cls}" ${key?`data-image="${esc(key)}"`:''} ${src?`src="${esc(src)}"`:''} alt="${esc(p.name)}" loading="lazy">`;
 }
 function hydrateImages(){document.querySelectorAll('img[data-image]').forEach(el=>{const [key,sku]=el.dataset.image.split('/'),src=state.images[key]?.[sku];if(src)el.src=src;});}
-function activeShipment(){return state.shipments.find(s=>s.id===state.current);}
+function activeShipment(){
+  const exact=state.shipments.find(s=>s.id===state.current);
+  if(exact)return exact;
+  const brand=brandById(state.current),catalog=brand&&catalogForBrand(brand.id);
+  return catalog|| (brand?{id:brand.id,title:brand.name,brand:brand.name,status:'arrived',groupingMode:'manual',groups:[],products:[],description:''}:null);
+}
 function isOpen(s){return s.status==='arrived';}
 function render(){
   document.querySelectorAll('[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===(state.view==='all-orders'?'admin':state.view)));
@@ -66,46 +75,36 @@ function render(){
   if(tg?.BackButton){if(state.current){tg.BackButton.show();}else{tg.BackButton.hide();}}
 }
 function renderShipments(){
-  app.innerHTML=`<div class="page-heading"><div><p class="eyebrow">EL / STORE</p><h1>Поступление</h1><p class="subtitle">Товары уже в наличии. Выберите нужное и оформите заказ.</p></div><span class="count">${state.shipments.length} поступлений</span></div>
-  <div class="toolbar"><input class="search" id="shipment-search" type="search" placeholder="Найти поступление или бренд" aria-label="Поиск поступления" value="${esc(state.search)}"><select id="sort" aria-label="Сортировка"><option value="new">Сначала новые</option><option value="eta">По дате поступления</option><option value="old">Сначала старые</option></select></div>
-  <div class="chips">${[['all','Все поступления'],['arrived','В продаже'],['closed','Завершённые']].map(([id,label])=>`<button class="chip ${state.filter===id?'active':''}" data-filter="${id}">${label}</button>`).join('')}</div><div class="shipment-grid" id="shipment-grid"></div>`;
-  $('#sort').value=state.sort;
-  const updateCards=debounce(()=>{if($('#shipment-grid'))cards();});
-  $('#shipment-search').oninput=e=>{state.search=e.target.value;updateCards();};
-  $('#sort').onchange=e=>{state.sort=e.target.value;cards();};
-  document.querySelectorAll('[data-filter]').forEach(b=>b.onclick=()=>{state.filter=b.dataset.filter;document.querySelectorAll('[data-filter]').forEach(c=>c.classList.toggle('active',c===b));cards();});
+  app.innerHTML=`<div class="page-heading"><div><p class="eyebrow">EL / STORE</p><h1>Товары</h1><p class="subtitle">Выберите бренд.</p></div><span class="count">3 бренда</span></div><div class="brand-grid" id="shipment-grid"></div>`;
   cards();
 }
 function cards(){
-  const list=state.shipments.filter(s=>(state.filter==='all'||s.status===state.filter)&&`${s.title} ${s.brand}`.toLowerCase().includes(state.search.toLowerCase())).sort((a,b)=>{
-    const key=state.sort==='eta'?'eta':'publishedAt',av=a[key],bv=b[key];
-    if(!av)return bv?1:0;if(!bv)return -1;
-    return state.sort==='new'?bv.localeCompare(av):av.localeCompare(bv);
-  });
-  $('#shipment-grid').innerHTML=list.length?list.map(s=>{
-    const examples=s.products.filter(p=>p.image||p.imageKey).slice(0,2),min=s.products.length?Math.min(...s.products.map(p=>p.price)):0;
-    return `<article class="shipment-card"><button class="card-open" data-shipment="${esc(s.id)}"><div class="card-visual ${esc(s.brand.toLowerCase())}">${examples.map(p=>photo(p,'cover-photo')).join('')}<span class="brand-label">${esc(s.brand)}</span></div><div class="card-body"><div class="card-meta">${badge(s.status)}<span class="muted">${s.publishedAt?date(s.publishedAt):'Не опубликовано'}</span></div><h2>${esc(s.title)}</h2><span class="muted">${s.products.length} позиций · от ${money(min)}</span><div class="card-footer"><span>Дата: ${date(s.eta)}</span><span class="arrow" aria-hidden="true">↗</span></div></div></button></article>`;
-  }).join(''):'<div class="empty"><strong>Поступлений пока нет</strong>Новые товары появятся здесь после публикации.</div>';
-  document.querySelectorAll('[data-shipment]').forEach(b=>b.onclick=()=>openShipment(b.dataset.shipment));
-  list.forEach(loadImages);
+  const list=BRANDS.map(brand=>({brand,catalog:catalogForBrand(brand.id)}));
+  $('#shipment-grid').innerHTML=list.map(({brand,catalog})=>{
+    const available=sellableProducts(catalog),examples=available.filter(p=>p.image||p.imageKey).slice(0,2);
+    return `<article class="brand-card"><button class="brand-open" data-brand="${esc(brand.id)}"><div class="brand-visual ${esc(brand.id)}">${examples.map(p=>photo(p,'cover-photo')).join('')}<span class="brand-name">${esc(brand.name)}</span></div><div class="brand-card-footer"><span>${available.length} товаров</span><span class="arrow" aria-hidden="true">→</span></div></button></article>`;
+  }).join('');
+  document.querySelectorAll('[data-brand]').forEach(b=>b.onclick=()=>openShipment(b.dataset.brand));
+  list.forEach(({catalog})=>catalog&&loadImages({...catalog,products:sellableProducts(catalog)}));
 }
 function openShipment(id){if(state.current!==id){state.cart={};state.requestKey=null;state.productGroup='';}state.current=id;state.view='shipments';render();window.scrollTo(0,0);}
 function renderDetail(){
   const s=activeShipment();if(!s){state.current=null;render();return;}
-  const groups=groupProducts(s.products,s.groupingMode==='manual'?s.groups:[]),hasGroups=groups.some(g=>g.name);
+  const visible=sellableProducts(s),groups=groupProducts(visible,s.groupingMode==='manual'?s.groups:[]),hasGroups=groups.some(g=>g.name);
   state.productGroup=groups.find(g=>groupKey(g.name)===groupKey(state.productGroup))?.name||'';
-  app.innerHTML=`<button class="back" id="back">← Все поступления</button><section class="detail-head">${badge(s.status)}<h1>${esc(s.title)}</h1>${s.description?`<p class="subtitle">${esc(s.description).replaceAll('\n','<br>')}</p>`:''}<div class="detail-meta"><span>Дата поступления<strong>${date(s.eta)}</strong></span><span>Позиций<strong>${s.products.length}</strong></span></div></section>${hasGroups?`<div class="toolbar"><input class="search" type="search" id="product-search" placeholder="Название, модель или артикул" aria-label="Поиск товара"><select id="product-group" aria-label="Группа товаров"><option value="">Все товары</option>${groups.filter(g=>g.name).map(g=>`<option value="${esc(g.name)}">${esc(g.name)} (${g.products.length})</option>`).join('')}</select></div>`:''}<div class="product-groups" id="products"></div>`;
-  if(hasGroups){$('#product-group').value=state.productGroup;$('#product-group').onchange=e=>{state.productGroup=e.target.value;products($('#product-search').value);};$('#product-search').oninput=debounce(e=>{if(e.target.isConnected)products(e.target.value);});}
-  $('#back').onclick=goBack;products('');loadImages(s);
+  app.innerHTML=`<button class="back" id="back">← Бренды</button><section class="detail-head"><p class="eyebrow">КАТАЛОГ</p><h1>${esc(s.brand||s.title)}</h1><div class="detail-meta"><span>В продаже<strong>${visible.length} позиций</strong></span></div></section><div class="toolbar"><input class="search" type="search" id="product-search" placeholder="Название, модель или артикул" aria-label="Поиск товара">${hasGroups?`<select id="product-group" aria-label="Группа товаров"><option value="">Все группы</option>${groups.filter(g=>g.name).map(g=>`<option value="${esc(g.name)}">${esc(g.name)} (${g.products.length})</option>`).join('')}</select>`:''}</div><div class="product-groups" id="products"></div>`;
+  if(hasGroups){$('#product-group').value=state.productGroup;$('#product-group').onchange=e=>{state.productGroup=e.target.value;products($('#product-search').value);};}
+  $('#product-search').oninput=debounce(e=>{if(e.target.isConnected)products(e.target.value);});
+  $('#back').onclick=goBack;products('');loadImages({...s,products:visible});
 }
 function products(query){
-  const s=activeShipment(),list=s.products.filter(p=>`${p.name} ${p.sku}`.toLowerCase().includes(query.toLowerCase()));
-  const definitions=s.groupingMode==='manual'?s.groups:[],hasGroups=groupProducts(s.products,definitions).some(g=>g.name);
+  const s=activeShipment(),visible=sellableProducts(s),list=visible.filter(p=>`${p.name} ${p.sku}`.toLowerCase().includes(query.toLowerCase()));
+  const definitions=s.groupingMode==='manual'?s.groups:[],hasGroups=groupProducts(visible,definitions).some(g=>g.name);
   const groups=groupProducts(list,definitions).filter(g=>!state.productGroup||groupKey(g.name)===groupKey(state.productGroup));
   $('#products').innerHTML=groups.length?groups.map((group,index)=>`<section class="product-group" ${hasGroups?`aria-labelledby="product-group-${index}"`:''}>${hasGroups?`<div class="group-heading"><h2 id="product-group-${index}">${esc(group.name||'Без группы')}</h2><span class="muted">Позиций: ${group.products.length}</span></div>`:''}<div class="products">${group.products.map(p=>{
     const qty=state.cart[p.id]||0,disabled=(!isOpen(s)&&!state.preview)||p.stock<=0;
-    return `<article class="product ${qty?'selected':''}" data-product="${esc(p.id)}">${photo(p)}<div><span class="sku">АРТ. ${esc(p.sku)}</span><p class="product-title">${esc(p.name)}</p><span class="price">${money(p.price)}</span><div class="stock">${p.stock>0?`В наличии ${p.stock} шт.`:'Нет в наличии'}</div></div><div class="product-bottom"><span class="muted" style="font-size:13px">Количество</span><div class="stepper"><button data-step="-1" data-id="${esc(p.id)}" aria-label="Уменьшить количество" ${disabled?'disabled':''}>−</button><input data-qty="${esc(p.id)}" type="number" inputmode="numeric" min="0" max="${p.stock}" value="${qty}" aria-label="Количество ${esc(p.sku)}" ${disabled?'disabled':''}><button data-step="1" data-id="${esc(p.id)}" aria-label="Увеличить количество" ${disabled?'disabled':''}>+</button></div></div></article>`;
-  }).join('')}</div></section>`).join(''):'<p class="empty">Ничего не найдено.</p>';
+    return `<article class="product compact-product ${qty?'selected':''}" data-product="${esc(p.id)}">${photo(p)}<div class="product-info"><span class="sku">${esc(p.sku)}</span><p class="product-title">${esc(p.name)}</p><span class="price">${money(p.price)} <small>/ ${esc(p.unit||'шт.')}</small></span><div class="stock">В наличии: ${p.stock}</div></div><div class="product-controls"><div class="stepper"><button data-step="-1" data-id="${esc(p.id)}" aria-label="Уменьшить количество" ${disabled?'disabled':''}>−</button><input data-qty="${esc(p.id)}" type="number" inputmode="numeric" min="0" max="${p.stock}" value="${qty}" aria-label="Количество ${esc(p.sku)}" ${disabled?'disabled':''}><button data-step="1" data-id="${esc(p.id)}" aria-label="Увеличить количество" ${disabled?'disabled':''}>+</button></div><strong class="line-total" data-line-total="${esc(p.id)}">${money(qty*p.price)}</strong></div></article>`;
+  }).join('')}</div></section>`).join(''):'<p class="empty">По этому фильтру товаров нет.</p>';
   document.querySelectorAll('[data-step]').forEach(b=>b.onclick=()=>setQuantity(b.dataset.id,(state.cart[b.dataset.id]||0)+Number(b.dataset.step)));
   document.querySelectorAll('[data-qty]').forEach(input=>input.onchange=()=>setQuantity(input.dataset.qty,Number(input.value)));
   hydrateImages();
@@ -115,6 +114,7 @@ function setQuantity(id,value){
   const qty=Math.max(0,Math.min(p.stock,Number.isFinite(value)?Math.floor(value):0));
   if(qty)state.cart[id]=qty;else delete state.cart[id];state.requestKey=null;
   const el=[...document.querySelectorAll('[data-qty]')].find(e=>e.dataset.qty===id);if(el){el.value=qty;el.closest('.product').classList.toggle('selected',qty>0);}
+  const total=document.querySelector(`[data-line-total="${CSS.escape(id)}"]`);if(total)total.textContent=money(qty*p.price);
   cartBar();
 }
 function totals(){const s=activeShipment();return Object.entries(state.cart).reduce((r,[id,q])=>{const p=s?.products.find(p=>p.id===id);if(p){r.count+=q;r.total+=q*p.price;}return r;},{count:0,total:0});}
@@ -159,7 +159,7 @@ async function renderOrders(all=false){
     const {orders}=await api('/orders'+(all?'?all=1':''));
     if(!container.isConnected)return;
     state.orders=orders;
-    $('#orders').innerHTML=orders.length?orders.map(r=>`<article class="order"><div class="top"><div><small>№ ${esc(r.id.slice(0,8))} · ${date(r.createdAt)}</small><h3 style="margin-top:8px">${esc(r.shipmentTitle)}</h3></div>${badge(r.status)}</div>${r.editedAt?'<p class="muted">Заказ изменён</p>':''}${all?`<p>${esc(r.user.name)} ${r.user.username?'@'+esc(r.user.username):''}</p>`:''}${r.manager?`<p class="muted">Менеджер: ${esc(r.manager.name)} · @${esc(r.manager.username)}</p>`:''}<strong>${money(r.total)}</strong><span class="muted"> · ${r.lines.reduce((s,l)=>s+l.quantity,0)} шт.</span><details><summary>Состав заказа</summary><ul>${r.lines.map(l=>`<li>${esc(l.sku)} · ${esc(l.name)} — <b>${l.quantity} шт.</b></li>`).join('')}</ul>${r.comment?`<p>${esc(r.comment)}</p>`:''}</details><div class="actions">${r.status==='placed'||all&&r.status==='confirmed'?`<button class="secondary" data-edit-order="${r.id}">Изменить</button>`:''}${all&&r.status==='placed'?`<button class="primary" data-confirm="${r.id}">Подтвердить</button>`:''}${r.status==='placed'||all&&r.status==='confirmed'?`<button class="danger" data-cancel="${r.id}">Отменить заказ</button>`:''}</div></article>`).join(''):'<div class="empty"><strong>Заказов пока нет</strong>Выберите поступление и добавьте нужные товары.</div>';
+    $('#orders').innerHTML=orders.length?orders.map(r=>`<article class="order"><div class="top"><div><small>№ ${esc(r.id.slice(0,8))} · ${date(r.createdAt)}</small><h3 style="margin-top:8px">${esc(r.shipmentTitle)}</h3></div>${badge(r.status)}</div>${r.editedAt?'<p class="muted">Заказ изменён</p>':''}${all?`<p>${esc(r.user.name)} ${r.user.username?'@'+esc(r.user.username):''}</p>`:''}${r.manager?`<p class="muted">Менеджер: ${esc(r.manager.name)} · @${esc(r.manager.username)}</p>`:''}<strong>${money(r.total)}</strong><span class="muted"> · ${r.lines.reduce((s,l)=>s+l.quantity,0)} шт.</span><details><summary>Состав заказа</summary><ul>${r.lines.map(l=>`<li>${esc(l.sku)} · ${esc(l.name)} — <b>${l.quantity} шт.</b></li>`).join('')}</ul>${r.comment?`<p>${esc(r.comment)}</p>`:''}</details><div class="actions">${r.status==='placed'||all&&r.status==='confirmed'?`<button class="secondary" data-edit-order="${r.id}">Изменить</button>`:''}${all&&r.status==='placed'?`<button class="primary" data-confirm="${r.id}">Подтвердить</button>`:''}${r.status==='placed'||all&&r.status==='confirmed'?`<button class="danger" data-cancel="${r.id}">Отменить заказ</button>`:''}</div></article>`).join(''):'<div class="empty"><strong>Заказов пока нет</strong>Выберите бренд и добавьте нужные товары.</div>';
     document.querySelectorAll('[data-edit-order]').forEach(b=>b.onclick=()=>editOrderForm(orders.find(r=>r.id===b.dataset.editOrder),all));
     document.querySelectorAll('[data-cancel]').forEach(b=>b.onclick=()=>changeOrder(b.dataset.cancel,'cancelled',all));
     document.querySelectorAll('[data-confirm]').forEach(b=>b.onclick=()=>changeOrder(b.dataset.confirm,'confirmed',all));
@@ -168,7 +168,7 @@ async function renderOrders(all=false){
 }
 async function editOrderForm(order,all){
   let shipment;
-  try{shipment=(await api('/catalog')).shipments.find(s=>s.id===order.shipmentId);if(!shipment)throw Error('Поступление недоступно. Обратитесь к менеджеру.');}catch(e){toast(e.message);return;}
+  try{shipment=(await api('/catalog')).shipments.find(s=>s.id===order.shipmentId);if(!shipment)throw Error('Каталог недоступен. Обратитесь к менеджеру.');}catch(e){toast(e.message);return;}
   const originals=new Map(order.lines.map(l=>[l.id,l])),draft=new Map(order.lines.map(l=>[l.id,l.quantity]));
   let requestKey=null;
   showDialog('Изменить заказ',`<p class="muted">${esc(order.shipmentTitle)}</p><p class="fine-print">Поставьте 0, чтобы убрать позицию. Увеличение количества возможно в пределах наличия. Для полного отказа отмените заказ.</p><form id="edit-order-form"><div id="edit-order-lines"></div><label class="field">Добавить товар<select id="add-order-product"><option value="">Выберите товар</option></select></label><p class="fine-print">Цена ранее выбранных позиций сохраняется. Новые позиции добавляются по текущей цене.</p><label class="field">Комментарий<textarea id="edit-order-comment" maxlength="1000">${esc(order.comment)}</textarea></label><p class="cart-total" id="edit-order-total"></p><p id="edit-order-error" class="error" role="alert"></p><button type="button" class="secondary full" id="reload-orders" hidden>Обновить список заказов</button><button class="primary full" type="submit" id="save-order">Сохранить изменения</button></form>`);
@@ -207,12 +207,11 @@ function changeOrder(id,status,all){
 }
 function renderAdmin(){
   if(!state.admin){state.view='shipments';render();return;}
-  app.innerHTML=`<div class="page-heading"><div><p class="eyebrow">EL / STORE</p><h1>Управление</h1></div><button class="primary" id="new-shipment">+ Поступление</button></div><div class="actions"><button class="secondary" id="all-orders">Все заказы</button><button class="secondary" id="managers">Менеджеры</button><button class="secondary" id="setup-bot">Подключить бота</button></div><section class="admin-panel">${state.shipments.length?state.shipments.map(s=>`<div class="admin-row"><div><strong>${esc(s.title)}</strong><small>${s.products.length} позиций · ${date(s.eta)}</small>${badge(s.status)}</div><div class="shipment-actions"><button class="secondary" data-edit="${esc(s.id)}">Изменить</button><button class="danger" data-delete-shipment="${esc(s.id)}">Удалить</button></div></div>`).join(''):'<p class="muted">Загрузите Excel, проверьте товары и опубликуйте поступление.</p>'}</section>`;
-  $('#new-shipment').onclick=()=>editShipment();$('#all-orders').onclick=()=>{state.view='all-orders';render();};
-  document.querySelectorAll('[data-delete-shipment]').forEach(b=>b.onclick=()=>deleteShipment(state.shipments.find(s=>s.id===b.dataset.deleteShipment)));
+  app.innerHTML=`<div class="page-heading"><div><p class="eyebrow">EL / STORE</p><h1>Управление</h1><p class="subtitle">Excel обновляет цены и текущие остатки по артикулу. Товары, которых нет в новом файле, скрываются автоматически.</p></div></div><div class="actions"><button class="secondary" id="all-orders">Все заказы</button><button class="secondary" id="managers">Менеджеры</button><button class="secondary" id="setup-bot">Подключить бота</button></div><section class="admin-panel">${BRANDS.map(brand=>{const catalog=catalogForBrand(brand.id),available=sellableProducts(catalog);return `<div class="admin-row"><div><strong>${esc(brand.name)}</strong><small>${available.length} товаров в продаже${catalog?' · каталог загружен':' · Excel ещё не загружен'}</small></div><button class="primary" data-brand-import="${esc(brand.id)}">${catalog?'Обновить Excel':'Загрузить Excel'}</button></div>`;}).join('')}</section>`;
+  $('#all-orders').onclick=()=>{state.view='all-orders';render();};
   $('#setup-bot').onclick=showBotSetup;
   $('#managers').onclick=editManagers;
-  document.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>editShipment(state.shipments.find(s=>s.id===b.dataset.edit)));
+  document.querySelectorAll('[data-brand-import]').forEach(b=>{const brand=brandById(b.dataset.brandImport);b.onclick=()=>editShipment(catalogForBrand(brand.id),brand);});
 }
 function deleteShipment(shipment){
   showDialog('Удалить поступление?',`<p><strong>${esc(shipment.title)}</strong></p><p>Поступление и его товары исчезнут из приложения. Отменённые заказы останутся в истории администратора. Поступление с действующими заказами удалить нельзя.</p><p id="delete-error" class="error" role="alert"></p><button class="danger full" id="delete-shipment">Удалить поступление</button>`);
@@ -247,7 +246,7 @@ async function editManagers(){
   };
 }
 function showBotSetup(){
-  showDialog('Подключение бота',`<p>Подключим команды бота и кнопку открытия поступлений.</p><p>Затем добавьте @E_NewSletters_Bot администратором рабочего канала с правом публикации и перешлите ему сообщение из этого канала. Бот ответит ID канала для настройки уведомлений.</p><p id="bot-setup-error" class="error" role="alert"></p><button class="primary full" id="connect-bot">Подключить</button>`);
+  showDialog('Подключение бота',`<p>Подключим команды бота и кнопку открытия товаров.</p><p>Затем добавьте @E_NewSletters_Bot администратором рабочего канала с правом публикации и перешлите ему сообщение из этого канала. Бот ответит ID канала для настройки уведомлений.</p><p id="bot-setup-error" class="error" role="alert"></p><button class="primary full" id="connect-bot">Подключить</button>`);
   $('#connect-bot').onclick=async()=>{
     const button=$('#connect-bot'),error=$('#bot-setup-error');button.disabled=true;button.textContent='Подключаем…';error.textContent='';
     try{
@@ -256,11 +255,13 @@ function showBotSetup(){
     }catch(e){error.textContent=e.message;button.disabled=false;button.textContent='Повторить подключение';}
   };
 }
-function editShipment(existing){
+function editShipment(existing,brand){
   importController?.abort();
+  brand ||= BRANDS.find(b=>b.id===existing?.id)||BRANDS.find(b=>b.name.toLowerCase()===String(existing?.brand||'').toLowerCase());
+  if(!brand){toast('Не удалось определить бренд.');return;}
   const groups=existing?.groupingMode==='manual'?[...(existing.groups||[])]:[];
-  let products=existing?manualProducts(existing.products.map(p=>({...p,total:p.total??p.stock})),groups):null,warnings=[],previousProducts=products||[];
-  showDialog(existing?'Настройки поступления':'Новое поступление',`<form id="shipment-form"><label class="field">Название<input name="title" required maxlength="160" value="${esc(existing?.title||'')}" placeholder="Например, Gurdini Slim Series"></label><div class="form-grid"><label class="field">Бренд<input name="brand" maxlength="80" value="${esc(existing?.brand||'')}"></label><label class="field">Статус<select name="status">${Object.entries(statuses).filter(([k])=>['draft','arrived','closed'].includes(k)).map(([k,v])=>`<option value="${k}" ${(existing?.status || 'arrived')===k?'selected':''}>${v}</option>`).join('')}</select></label><label class="field">Дата поступления<input type="date" name="eta" value="${esc(existing?.eta||'')}"></label><label class="field">Дата публикации<input type="date" name="publishedAt" value="${esc(existing?.publishedAt||'')}"></label></div><label class="field">Описание<textarea name="description" maxlength="3000">${esc(existing?.description||'')}</textarea></label><label class="field">${existing?'Обновить товары из Excel':'Excel с товарами'}<input type="file" id="xlsx-file" accept=".xls,.xlsx"></label><p class="fine-print">Кол-во в Excel — исходное количество товара до вычета заказов. При обновлении действующие заказы сохраняются.</p><div id="import-info">${products?`<p class="import-summary">${products.length} позиций</p>`:''}</div><div id="group-editor"></div><p id="import-error" class="error" role="alert"></p><button class="primary full" id="save-shipment" type="submit" ${products?'':'disabled'}>Сохранить поступление</button></form>`);
+  let products=existing?manualProducts(existing.products.filter(p=>!p.hidden&&p.stock>0).map(p=>({...p,stock:p.stock})),groups):null,warnings=[],previousProducts=products||[];
+  showDialog(`${brand.name} — каталог`,`<form id="shipment-form"><p class="fine-print">Загрузите актуальный Excel. Совпадение идёт по артикулу: цена и остаток обновятся, отсутствующие в новом файле товары будут скрыты.</p><label class="field">${existing?'Обновить каталог из Excel':'Excel с товарами'}<input type="file" id="xlsx-file" accept=".xls,.xlsx" ${existing?'':'required'}></label><div id="import-info">${products?`<p class="import-summary">Сейчас в продаже: ${products.length} позиций</p>`:''}</div><div id="group-editor"></div><p id="import-error" class="error" role="alert"></p><button class="primary full" id="save-shipment" type="submit" ${products?'':'disabled'}>Сохранить каталог</button></form>`);
   const form=$('#shipment-form');
   function reviewGroups(){mountGroupEditor($('#group-editor'),products,groups);}
   if(products)reviewGroups();
@@ -273,9 +274,12 @@ function editShipment(existing){
     try{
       const result=await readSupplierExcel(file,{signal:controller.signal});
       if(controller.signal.aborted||!form.isConnected)return;
-      products=manualProducts(result.products,groups,previousProducts);warnings=result.warnings;reviewGroups();
-      if(!form.elements.title.value)form.elements.title.value=file.name.replace(/\.xlsx?$/i,'');
-      $('#import-info').innerHTML=`<div class="import-summary">${products.length} позиций · ${products.filter(p=>p.image).length} фотографий</div>${warnings.length?`<details class="warning"><summary>Замечания: ${warnings.length}</summary>${warnings.map(w=>`<div>${esc(w)}</div>`).join('')}</details><label class="field"><input id="accept-warnings" type="checkbox" style="width:auto;min-height:auto"> Проверил замечания</label>`:''}<div class="import-preview"><table><thead><tr><th>Товар</th><th>Кол-во</th><th>Цена</th></tr></thead><tbody>${products.map(p=>`<tr><td>${esc(p.name)}<br>${esc(p.sku)}</td><td>${p.stock}</td><td>${p.price===null?`<input data-import-price="${esc(p.id)}" type="number" inputmode="decimal" required min="0" max="1000000" step="0.01" placeholder="Цена, ₽" aria-label="Цена ${esc(p.sku)}">`:money(p.price)}</td></tr>`).join('')}</tbody></table></div>`;
+      const previousById=new Map(previousProducts.map(p=>[p.id,p]));
+      const merged=result.products.map(p=>{const old=previousById.get(p.id);return {...p,image:p.image||old?.image||null,imageKey:p.imageKey||old?.imageKey||null};});
+      products=manualProducts(merged,groups,previousProducts);warnings=result.warnings;reviewGroups();
+      const previousIds=new Set(previousProducts.map(p=>p.id)),nextIds=new Set(products.map(p=>p.id));
+      const hidden=[...previousIds].filter(id=>!nextIds.has(id)).length;
+      $('#import-info').innerHTML=`<div class="import-summary">${products.length} позиций · ${products.filter(p=>p.image||p.imageKey).length} фотографий${hidden?` · будет скрыто: ${hidden}`:''}</div>${warnings.length?`<details class="warning"><summary>Замечания: ${warnings.length}</summary>${warnings.map(w=>`<div>${esc(w)}</div>`).join('')}</details><label class="field"><input id="accept-warnings" type="checkbox" style="width:auto;min-height:auto"> Проверил замечания</label>`:''}<div class="import-preview"><table><thead><tr><th>Товар</th><th>Остаток</th><th>Цена</th></tr></thead><tbody>${products.map(p=>`<tr><td>${esc(p.name)}<br>${esc(p.sku)}</td><td>${p.stock}</td><td>${p.price===null?`<input data-import-price="${esc(p.id)}" type="number" inputmode="decimal" required min="0" max="1000000" step="0.01" placeholder="Цена, ₽" aria-label="Цена ${esc(p.sku)}">`:money(p.price)}</td></tr>`).join('')}</tbody></table></div>`;
       form.querySelectorAll('[data-import-price]').forEach(input=>input.oninput=()=>{const product=products.find(p=>p.id===input.dataset.importPrice);product.price=input.value.trim()&&input.validity.valid?Math.round(Number(input.value)*100):null;});
       $('#save-shipment').disabled=false;
     }catch(e){if(controller.signal.aborted||!form.isConnected)return;products=null;$('#import-info').textContent='';$('#import-error').textContent=e.message;}
@@ -285,10 +289,13 @@ function editShipment(existing){
     if(products.some(p=>p.price===null)){$('#import-error').textContent='Заполните цены всех товаров перед сохранением.';return;}
     if(warnings.length&&!$('#accept-warnings')?.checked){$('#import-error').textContent='Подтвердите проверку замечаний.';return;}
     const b=$('#save-shipment');b.disabled=true;$('#import-error').textContent='';
-    try{await api('/admin/shipments','POST',{id:existing?.id||crypto.randomUUID(),...Object.fromEntries(new FormData(form)),groupingMode:'manual',groups,products});closeDialog();await refresh();toast('Поступление сохранено.');}catch(e){if($('#import-error')){$('#import-error').textContent=e.message;b.disabled=false;}else toast(e.message);}
+    try{
+      await api('/admin/shipments','POST',{id:brand.id,title:brand.name,brand:brand.name,status:'arrived',description:'',groupingMode:'manual',groups,products});
+      closeDialog();await refresh();toast(`${brand.name}: каталог обновлён.`);
+    }catch(e){if($('#import-error')){$('#import-error').textContent=e.message;b.disabled=false;}else toast(e.message);}
   };
 }
-function goBack(){if(Object.keys(state.cart).length){showDialog('Вернуться к поступлениям?',`<p>Выбранные количества будут сброшены.</p><button class="primary full" id="leave">Вернуться</button>`);$('#leave').onclick=()=>{closeDialog();state.cart={};state.current=null;state.requestKey=null;render();};}else{state.current=null;render();}}
+function goBack(){if(Object.keys(state.cart).length){showDialog('Вернуться к брендам?',`<p>Выбранные количества будут сброшены.</p><button class="primary full" id="leave">Вернуться</button>`);$('#leave').onclick=()=>{closeDialog();state.cart={};state.current=null;state.requestKey=null;render();};}else{state.current=null;render();}}
 async function refresh({background=false}={}){
   if(state.preview){if(!background)render();return;}
   if(background&&document.activeElement?.matches('[data-qty]'))return;
@@ -302,7 +309,7 @@ async function refresh({background=false}={}){
       state.shipments=shipments;
       const changed=previous!==JSON.stringify(state.shipments);
       if(background && (!changed||dialog.open))return;
-      if(state.view==='shipments' && $('#shipment-grid')){cards();$('.count').textContent=state.shipments.length+' поступлений';cartBar();return;}
+      if(state.view==='shipments' && $('#shipment-grid')){cards();$('.count').textContent=state.shipments.length+' бренда';cartBar();return;}
       if(state.view==='shipments' && $('#product-search')){
         const input=$('#product-search'),query=input.value,focused=document.activeElement;
         if(!activeShipment()){state.current=null;state.cart={};state.requestKey=null;render();return;}
