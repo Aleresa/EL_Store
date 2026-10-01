@@ -16,6 +16,21 @@ async function telegram(env,method,body) {
   return result.result;
 }
 
+const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+async function telegramWithDnsRetry(env,method,body) {
+  let lastError;
+  for(let attempt=1;attempt<=5;attempt++) {
+    try { return await telegram(env,method,body); }
+    catch(error) {
+      lastError=error;
+      const dns=/Failed to resolve host|Temporary failure in name resolution/i.test(error?.telegramDescription||'');
+      if(!dns || attempt===5) throw error;
+      await sleep(attempt*1200);
+    }
+  }
+  throw lastError;
+}
+
 export class NewsletterStore {
   constructor(ctx,env) {
     this.ctx=ctx; this.env=env;
@@ -79,7 +94,8 @@ export class NewsletterStore {
     return this.env.WEBHOOK_SECRET || this.inventory.one("SELECT value FROM bot_settings WHERE key='webhook_secret'")?.value;
   }
   async setupBot(origin) {
-    if(!origin.startsWith('https://')) throw new ApiError(400,'Для подключения нужен HTTPS-адрес приложения.');
+    const appUrl=String(this.env.MINI_APP_URL||origin).replace(/\/$/,'');
+    if(!appUrl.startsWith('https://')) throw new ApiError(400,'Для подключения нужен HTTPS-адрес приложения.');
     if(!this.webhookSecret()) {
       const secret=Array.from(crypto.getRandomValues(new Uint8Array(32)),b=>b.toString(16).padStart(2,'0')).join('');
       // Persist before registering with Telegram; repeated clicks and restarts reuse it.
@@ -88,16 +104,16 @@ export class NewsletterStore {
     const secret=this.webhookSecret();
     if(!/^[A-Za-z0-9_-]{16,256}$/.test(secret)) throw new ApiError(400,'Проверьте WEBHOOK_SECRET: от 16 до 256 латинских букв, цифр, дефисов или подчёркиваний.');
     try {
+      await telegramWithDnsRetry(this.env,'setWebhook',{url:appUrl+'/telegram/webhook',secret_token:secret,allowed_updates:['message']});
       await Promise.all([
-        telegram(this.env,'setWebhook',{url:origin+'/telegram/webhook',secret_token:secret,allowed_updates:['message']}),
-        telegram(this.env,'setChatMenuButton',{menu_button:{type:'web_app',text:'Поступление',web_app:{url:origin}}}),
+        telegram(this.env,'setChatMenuButton',{menu_button:{type:'web_app',text:'Поступление',web_app:{url:appUrl}}}),
         telegram(this.env,'setMyCommands',{commands:[{command:'start',description:'Открыть поступления'},{command:'id',description:'Узнать свой Telegram ID'},{command:'admin',description:'Управление поступлениями'}]})
       ]);
     } catch(error) {
       const detail=String(error?.telegramDescription||'').trim();
       throw new ApiError(502,detail?`Telegram: ${detail}`:'Не удалось завершить настройку бота. Проверьте настройки Telegram и повторите подключение.');
     }
-    return {ok:true};
+    return {ok:true,webhookUrl:appUrl+'/telegram/webhook'};
   }
   async ensureAlarm() { if(!(await this.ctx.storage.getAlarm())) await this.ctx.storage.setAlarm(Date.now()+30000); }
   async flush() {
