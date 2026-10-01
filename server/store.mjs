@@ -49,11 +49,11 @@ export class Inventory {
     });
   }
   deleteShipment(id) {
-    if(!validId(id))throw new ApiError(400,'Некорректное поступление.');
+    if(!validId(id))throw new ApiError(400,'Некорректный каталог.');
     return this.transaction(()=>{
       if(!this.one('SELECT id FROM shipments WHERE id=?',id))return {deleted:true};
       const active=this.one("SELECT id FROM orders WHERE shipment=? AND status IN ('placed','confirmed') LIMIT 1",id);
-      if(active || this.one('SELECT id FROM products WHERE shipment=? AND placed>0 LIMIT 1',id))throw new ApiError(409,'В поступлении есть действующие заказы. Для остановки новых заказов закройте поступление в настройках.');
+      if(active || this.one('SELECT id FROM products WHERE shipment=? AND placed>0 LIMIT 1',id))throw new ApiError(409,'В каталоге есть действующие заказы.');
       this.sql.exec('DELETE FROM products WHERE shipment=?',id);
       this.sql.exec('DELETE FROM shipments WHERE id=?',id);
       // Order snapshots and notification history remain available to the owner.
@@ -121,7 +121,7 @@ export class Inventory {
       if(!manager) throw new ApiError(400,'Выберите менеджера из актуального списка. Если список пуст, обратитесь в магазин.');
       const shipmentRow=this.one('SELECT data FROM shipments WHERE id=?',input.shipmentId);
       const shipment=shipmentRow && JSON.parse(shipmentRow.data);
-      if(!shipment || !ACTIVE.has(shipment.status)) throw new ApiError(409,'Заказы по этому поступлению закрыты.');
+      if(!shipment || !ACTIVE.has(shipment.status)) throw new ApiError(409,'Заказы по этому каталогу закрыты.');
       const detailed=lines.map(l=>{
         const row=this.one('SELECT * FROM products WHERE shipment=? AND id=?',input.shipmentId,l.id);
         if(!row) throw new ApiError(409,'Товар больше не доступен.');
@@ -157,7 +157,7 @@ export class Inventory {
       if(row.status==='cancelled' || (!admin && row.status==='confirmed')) throw new ApiError(409,'Этот заказ нельзя изменить. Для подтверждённого заказа обратитесь к менеджеру.');
       if(revision!==input.expectedRevision) throw new ApiError(409,'Заказ уже изменён. Обновите список заказов и откройте его заново.');
       const shipmentRow=this.one('SELECT data FROM shipments WHERE id=?',row.shipment);
-      if(!shipmentRow || (!admin && !ACTIVE.has(JSON.parse(shipmentRow.data).status))) throw new ApiError(409,'Изменение этого поступления закрыто. Обратитесь к менеджеру.');
+      if(!shipmentRow || (!admin && !ACTIVE.has(JSON.parse(shipmentRow.data).status))) throw new ApiError(409,'Изменение этого каталога закрыто. Обратитесь к менеджеру.');
       const old=new Map(previous.lines.map(l=>[l.id,l]));
       const detailed=lines.map(l=>{
         const productRow=this.one('SELECT * FROM products WHERE shipment=? AND id=?',row.shipment,l.id);
@@ -204,7 +204,7 @@ export class Inventory {
   notificationText(data) {
     const name=data.status==='cancelled'?'Заказ отменён':data.status==='confirmed'?'Заказ подтверждён':data.editedAt?'Заказ изменён':'Новый заказ';
     const who=`${data.user.name}${data.user.username?' @'+data.user.username:''} (ID ${data.user.id})`;
-    return `${name} №${data.id}${data.manager?'\nМенеджер: '+data.manager.name+' @'+data.manager.username:''}\nКлиент: ${who}\nПоступление: ${data.shipmentTitle}${data.editedAt?'\nИзменён: '+data.editedAt.replace('T',' ').slice(0,19)+' UTC':''}\n\n${data.lines.map(l=>`${l.sku} · ${l.name}\n${l.quantity} шт. × ${(l.price/100).toFixed(2)} ₽`).join('\n\n')}\n\nИтого: ${(data.total/100).toFixed(2)} ₽${data.comment?'\nКомментарий: '+data.comment:''}`;
+    return `${name} №${data.id}${data.manager?'\nМенеджер: '+data.manager.name+' @'+data.manager.username:''}\nКлиент: ${who}\nБренд: ${data.shipmentTitle}${data.editedAt?'\nИзменён: '+data.editedAt.replace('T',' ').slice(0,19)+' UTC':''}\n\n${data.lines.map(l=>`${l.sku} · ${l.name}\n${l.quantity} шт. × ${(l.price/100).toFixed(2)} ₽`).join('\n\n')}\n\nИтого: ${(data.total/100).toFixed(2)} ₽${data.comment?'\nКомментарий: '+data.comment:''}`;
   }
   enqueue(data,event) {
     const text=this.notificationText(data);
