@@ -290,7 +290,7 @@ function editShipment(existing,brand){
     if(warnings.length&&!$('#accept-warnings')?.checked){$('#import-error').textContent='Подтвердите проверку замечаний.';return;}
     const b=$('#save-shipment');b.disabled=true;$('#import-error').textContent='';
     try{
-      await api('/admin/shipments','POST',{id:brand.id,title:brand.name,brand:brand.name,status:'arrived',description:'',groupingMode:'manual',groups,products});
+      await api('/admin/shipments','POST',{id:brand.id,title:brand.name,brand:brand.name,status:'arrived',stockMode:'live',description:'',groupingMode:'manual',groups,products});
       closeDialog();await refresh();toast(`${brand.name}: каталог обновлён.`);
     }catch(e){if($('#import-error')){$('#import-error').textContent=e.message;b.disabled=false;}else toast(e.message);}
   };
