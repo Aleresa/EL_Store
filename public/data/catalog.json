@@ -10,23 +10,28 @@
       "publishedAt": null,
       "eta": null,
       "groupingMode": "manual",
-      "groups": [],
+      "groups": [
+        "Оригинал",
+        "Копия"
+      ],
       "products": [
         {
           "id": "MM0A3",
           "sku": "MM0A3",
           "name": "Оригинальный кабель Lightning to USB-C 1 м",
+          "group": "Оригинал",
           "stock": 10,
           "price": 90000,
           "unit": "шт",
           "image": null
         },
         {
-          "id": "MQGH2",
-          "sku": "MQGH2",
-          "name": "Оригинальный кабель Lightning to USB-C 2 м",
+          "id": "APPLE-COPY-1",
+          "sku": "APPLE-COPY-1",
+          "name": "Кабель Lightning to USB-C 1 м",
+          "group": "Копия",
           "stock": 8,
-          "price": 100000,
+          "price": 45000,
           "unit": "шт",
           "image": null
         }
@@ -42,14 +47,39 @@
       "publishedAt": null,
       "eta": null,
       "groupingMode": "manual",
-      "groups": [],
+      "groups": [
+        "GL-27",
+        "GL-27 Privacy",
+        "ES-01"
+      ],
       "products": [
         {
-          "id": "REMAX-DEMO",
-          "sku": "REMAX-DEMO",
-          "name": "Пример товара Remax",
+          "id": "GL27-DEMO",
+          "sku": "GL27-DEMO",
+          "name": "Защитное стекло Remax GL-27",
+          "group": "GL-27",
           "stock": 12,
           "price": 75000,
+          "unit": "шт",
+          "image": null
+        },
+        {
+          "id": "GL27P-DEMO",
+          "sku": "GL27P-DEMO",
+          "name": "Защитное стекло Remax GL-27 Privacy",
+          "group": "GL-27 Privacy",
+          "stock": 7,
+          "price": 85000,
+          "unit": "шт",
+          "image": null
+        },
+        {
+          "id": "ES01-DEMO",
+          "sku": "ES01-DEMO",
+          "name": "Защитное стекло Remax ES-01",
+          "group": "ES-01",
+          "stock": 9,
+          "price": 70000,
           "unit": "шт",
           "image": null
         }
@@ -65,14 +95,39 @@
       "publishedAt": null,
       "eta": null,
       "groupingMode": "manual",
-      "groups": [],
+      "groups": [
+        "Стекла",
+        "Чехлы",
+        "Аккумуляторы"
+      ],
       "products": [
         {
-          "id": "GURDINI-DEMO",
-          "sku": "GURDINI-DEMO",
-          "name": "Пример товара Gurdini",
+          "id": "G-GLASS",
+          "sku": "G-GLASS",
+          "name": "Защитное стекло Gurdini",
+          "group": "Стекла",
           "stock": 6,
+          "price": 60000,
+          "unit": "шт",
+          "image": null
+        },
+        {
+          "id": "G-CASE",
+          "sku": "G-CASE",
+          "name": "Чехол Gurdini",
+          "group": "Чехлы",
+          "stock": 10,
           "price": 120000,
+          "unit": "шт",
+          "image": null
+        },
+        {
+          "id": "G-BATT",
+          "sku": "G-BATT",
+          "name": "Аккумулятор Gurdini",
+          "group": "Аккумуляторы",
+          "stock": 5,
+          "price": 220000,
           "unit": "шт",
           "image": null
         }
