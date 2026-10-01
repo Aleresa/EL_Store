@@ -3,6 +3,7 @@ import {groupKey} from '../public/product-groups.js';
 
 const ACTIVE = new Set(['arrived']);
 const STATUSES = new Set(['draft','arrived','closed']);
+const FIXED_CATEGORIES={apple:['Оригинал','Копия'],remax:['GL-27','GL-27 Privacy','ES-01'],gurdini:['Стекла','Чехлы','Аккумуляторы']};
 const validId = x => typeof x === 'string' && /^[a-zA-Z0-9_-]{1,80}$/.test(x);
 const trim = (s,n) => typeof s === 'string' ? s.trim().slice(0,n) : '';
 
@@ -51,7 +52,8 @@ export class Inventory {
     if(input.groupingMode!==undefined&&input.groupingMode!=='manual')throw new ApiError(400,'Некорректный режим групп.');
     const groups=input.groupingMode==='manual'?(input.groups??[]):[];
     if(!Array.isArray(groups)||groups.length>100||groups.some(g=>typeof g!=='string'||!g.trim()||g.length>80)||new Set(groups.map(groupKey)).size!==groups.length)throw new ApiError(400,'Укажите до 100 групп с уникальными названиями до 80 символов.');
-    const groupNames=groups.map(g=>g.trim().replace(/\s+/g,' '));
+    const fixedCategories=input.stockMode==='live'?FIXED_CATEGORIES[input.id]:null;
+    const groupNames=fixedCategories?[...fixedCategories]:groups.map(g=>g.trim().replace(/\s+/g,' '));
     const shipment = {id:input.id,title:trim(input.title,160),brand:trim(input.brand,80),description:trim(input.description,3000),status:input.status,stockMode:input.stockMode==='live'?'live':(previous?.stockMode||'legacy'),groupingMode:'manual',groups:groupNames,eta:input.eta || null,
       publishedAt:input.publishedAt || previous?.publishedAt || (input.status === 'draft'?null:new Date().toISOString().slice(0,10))};
     const ids = new Set();
@@ -64,7 +66,8 @@ export class Inventory {
       if(input.groupingMode==='manual'&&p.group!==undefined&&(typeof p.group!=='string'||p.group.length>80))throw new ApiError(400,'Некорректная группа товара.');
       const group=input.groupingMode==='manual'?trim(p.group,80):'';
       const groupName=groupNames.find(g=>groupKey(g)===groupKey(group));
-      if(group&&!groupName)throw new ApiError(400,'Сначала создайте группу для товара.');
+      if(fixedCategories&&!groupName)throw new ApiError(400,`${p.sku||p.id}: выберите категорию товара.`);
+      if(group&&!groupName)throw new ApiError(400,'Выберите существующую категорию товара.');
       return {id:p.id,sku:trim(p.sku || p.id,80),name:trim(p.name,500),group:groupName||'',position,price:p.price,unit:trim(p.unit || 'шт',20),image:p.image || null,imageKey:p.imageKey || null,stock,total:stock};
     });
     return this.transaction(()=>{
