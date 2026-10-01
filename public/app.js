@@ -76,7 +76,7 @@ function render(){
   else if(state.view==='all-orders')renderOrders(true);
   else if(state.view==='admin')renderAdmin();
   cartBar();
-  if(tg?.BackButton){if(state.current){tg.BackButton.show();}else{tg.BackButton.hide();}}
+  if(tg?.BackButton){if(state.view==='shipments'&&state.current){tg.BackButton.show();}else{tg.BackButton.hide();}}
 }
 function renderShipments(){
   app.innerHTML=`<div class="page-heading"><div><p class="eyebrow">EL / STORE</p><h1>Товары</h1><p class="subtitle">Выберите бренд.</p></div><span class="count">3 бренда</span></div><div class="brand-grid" id="shipment-grid"></div>`;
