@@ -8,6 +8,6 @@
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["NewsletterStore"] }],
   "vars": {
     "BOT_USERNAME": "E_NewSletters_Bot",
-    "MINI_APP_URL": "https://t.me/E_NewSletters_Bot/EL_Store"
+    "MINI_APP_URL": "https://el-store.elereas.workers.dev"
   }
 }
