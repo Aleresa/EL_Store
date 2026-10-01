@@ -41,7 +41,7 @@ async function init(){
       notice(state.ready?'':'Приём заказов откроется после подключения рабочего канала.');
     }
     render();
-  }catch(e){app.innerHTML=`<div class="empty"><strong>Не удалось загрузить поступления</strong>${esc(e.message)}<p><button class="primary" id="retry">Попробовать ещё раз</button></p></div>`;$('#retry').onclick=init;}
+  }catch(e){app.innerHTML=`<div class="empty"><strong>Не удалось загрузить товары</strong>${esc(e.message)}<p><button class="primary" id="retry">Попробовать ещё раз</button></p></div>`;$('#retry').onclick=init;}
 }
 async function loadImages(shipment){
   const keys=[...new Set(shipment.products.filter(p=>p.imageKey).map(p=>p.imageKey.split('/')[0]))];
@@ -214,7 +214,7 @@ function renderAdmin(){
   document.querySelectorAll('[data-brand-import]').forEach(b=>{const brand=brandById(b.dataset.brandImport);b.onclick=()=>editShipment(catalogForBrand(brand.id),brand);});
 }
 function deleteShipment(shipment){
-  showDialog('Удалить поступление?',`<p><strong>${esc(shipment.title)}</strong></p><p>Поступление и его товары исчезнут из приложения. Отменённые заказы останутся в истории администратора. Поступление с действующими заказами удалить нельзя.</p><p id="delete-error" class="error" role="alert"></p><button class="danger full" id="delete-shipment">Удалить поступление</button>`);
+  showDialog('Удалить каталог?',`<p><strong>${esc(shipment.title)}</strong></p><p>Каталог и его товары исчезнут из приложения. Отменённые заказы останутся в истории администратора. Каталог с действующими заказами удалить нельзя.</p><p id="delete-error" class="error" role="alert"></p><button class="danger full" id="delete-shipment">Удалить каталог</button>`);
   const error=$('#delete-error'),button=$('#delete-shipment');
   button.onclick=async()=>{
     button.disabled=true;error.textContent='';
@@ -222,7 +222,7 @@ function deleteShipment(shipment){
       await api('/admin/shipments/'+encodeURIComponent(shipment.id),'DELETE');
       state.shipments=state.shipments.filter(s=>s.id!==shipment.id);
       if(state.current===shipment.id){state.current=null;state.cart={};state.requestKey=null;}
-      closeDialog();render();toast('Поступление удалено.');
+      closeDialog();render();toast('Каталог удалён.');
     }catch(e){error.textContent=e.message;button.disabled=false;}
   };
 }
@@ -309,7 +309,7 @@ async function refresh({background=false}={}){
       state.shipments=shipments;
       const changed=previous!==JSON.stringify(state.shipments);
       if(background && (!changed||dialog.open))return;
-      if(state.view==='shipments' && $('#shipment-grid')){cards();$('.count').textContent=state.shipments.length+' бренда';cartBar();return;}
+      if(state.view==='shipments' && $('#shipment-grid')){cards();$('.count').textContent='3 бренда';cartBar();return;}
       if(state.view==='shipments' && $('#product-search')){
         const input=$('#product-search'),query=input.value,focused=document.activeElement;
         if(!activeShipment()){state.current=null;state.cart={};state.requestKey=null;render();return;}
