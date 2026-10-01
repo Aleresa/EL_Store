@@ -93,8 +93,9 @@ export class NewsletterStore {
         telegram(this.env,'setChatMenuButton',{menu_button:{type:'web_app',text:'Поступление',web_app:{url:origin}}}),
         telegram(this.env,'setMyCommands',{commands:[{command:'start',description:'Открыть поступления'},{command:'id',description:'Узнать свой Telegram ID'},{command:'admin',description:'Управление поступлениями'}]})
       ]);
-    } catch {
-      throw new ApiError(502,'Не удалось завершить настройку бота. Повторите подключение; если ошибка сохранится, проверьте BOT_TOKEN в Cloudflare.');
+    } catch(error) {
+      const detail=String(error?.telegramDescription||'').trim();
+      throw new ApiError(502,detail?`Telegram: ${detail}`:'Не удалось завершить настройку бота. Проверьте настройки Telegram и повторите подключение.');
     }
     return {ok:true};
   }
