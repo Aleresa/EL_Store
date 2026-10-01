@@ -47,11 +47,6 @@ export class NewsletterStore {
       const user=await authenticate(request.headers.get('X-Telegram-Init-Data'),this.env.BOT_TOKEN);
       const admin=isAdmin(user,this.env);
       if(path==='/api/me' && request.method==='GET') return json({user,admin});
-      if(path==='/api/managers' && request.method==='GET') return json({managers:this.inventory.managers()});
-      if(path==='/api/admin/managers' && request.method==='PUT') {
-        if(!admin) throw new ApiError(403,'Раздел доступен только владельцу.');
-        return json({managers:this.inventory.saveManagers(await readJson(request))});
-      }
       if(path==='/api/admin/setup-bot' && request.method==='POST') {
         if(!admin) throw new ApiError(403,'Раздел доступен только владельцу.');
         await readJson(request);
