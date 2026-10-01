@@ -321,7 +321,11 @@ async function refresh({background=false}={}){
   })();
   return refreshPromise;
 }
-document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>{state.view=b.dataset.view;render();window.scrollTo(0,0);});
+document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>{
+  const target=b.dataset.view;
+  if(target==='shipments'){state.current=null;state.productGroup='';state.cart={};state.requestKey=null;}
+  state.view=target;render();window.scrollTo(0,0);
+});
 $('#refresh').onclick=()=>refresh();
 dialog.addEventListener('close',()=>importController?.abort());
 $('.brand').onclick=e=>{e.preventDefault();state.view='shipments';if(state.current)goBack();else render();};
