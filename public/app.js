@@ -1,6 +1,5 @@
 import {readSupplierExcel,exportOrders} from './xlsx.js';
-import {groupProducts,manualProducts,groupKey} from './product-groups.js';
-import {mountGroupEditor} from './group-editor.js';
+import {manualProducts,groupKey} from './product-groups.js';
 
 const $=s=>document.querySelector(s), app=$('#app'), dialog=$('#dialog');
 const tg=window.Telegram?.WebApp;
@@ -9,11 +8,16 @@ const moneyFormats=[0,2].map(maximumFractionDigits=>new Intl.NumberFormat('ru-RU
 const money=n=>moneyFormats[n%100?1:0].format(n/100);
 const date=s=>s?new Date(s.length===10?s+'T12:00:00':s).toLocaleDateString('ru-RU',{day:'numeric',month:'long'}):'Дата не указана';
 const statuses={draft:'Скрыт',arrived:'В продаже',closed:'Продажа закрыта',placed:'Оформлен',confirmed:'Подтверждён',cancelled:'Отменён'};
-const BRANDS=[{id:'apple',name:'Apple'},{id:'remax',name:'Remax'},{id:'gurdini',name:'Gurdini'}];
+const BRANDS=[
+  {id:'apple',name:'Apple',categories:['Оригинал','Копия']},
+  {id:'remax',name:'Remax',categories:['GL-27','GL-27 Privacy','ES-01']},
+  {id:'gurdini',name:'Gurdini',categories:['Стекла','Чехлы','Аккумуляторы']}
+];
 const brandById=id=>BRANDS.find(b=>b.id===id);
 const catalogForBrand=id=>{const b=brandById(id);return state.shipments.find(s=>s.id===id)||(b&&state.shipments.find(s=>String(s.brand||s.title).toLowerCase()===b.name.toLowerCase()));};
 const sellableProducts=catalog=>(catalog?.products||[]).filter(p=>!p.hidden&&p.stock>0);
-const state={preview:false,admin:false,ready:false,view:'shipments',shipments:[],current:null,filter:'all',sort:'new',search:'',cart:{},images:{},orders:[],requestKey:null,managers:[],managerId:null,productGroup:''};
+const categoriesFor=id=>brandById(id)?.categories||[];
+const state={preview:false,admin:false,ready:false,view:'shipments',shipments:[],current:null,filter:'all',sort:'new',search:'',cart:{},images:{},orders:[],requestKey:null,productGroup:''};
 let toastTimer,refreshPromise,importController;
 const imageRequests=new Map();
 const debounce=(fn,delay=120)=>{let timer;return (...args)=>{clearTimeout(timer);timer=setTimeout(()=>fn(...args),delay);};};
@@ -62,7 +66,7 @@ function activeShipment(){
   const exact=state.shipments.find(s=>s.id===state.current);
   if(exact)return exact;
   const brand=brandById(state.current),catalog=brand&&catalogForBrand(brand.id);
-  return catalog|| (brand?{id:brand.id,title:brand.name,brand:brand.name,status:'arrived',groupingMode:'manual',groups:[],products:[],description:''}:null);
+  return catalog|| (brand?{id:brand.id,title:brand.name,brand:brand.name,status:'arrived',groupingMode:'manual',groups:[...brand.categories],products:[],description:''}:null);
 }
 function isOpen(s){return s.status==='arrived';}
 function render(){
@@ -90,21 +94,29 @@ function cards(){
 function openShipment(id){if(state.current!==id){state.cart={};state.requestKey=null;state.productGroup='';}state.current=id;state.view='shipments';render();window.scrollTo(0,0);}
 function renderDetail(){
   const s=activeShipment();if(!s){state.current=null;render();return;}
-  const visible=sellableProducts(s),groups=groupProducts(visible,s.groupingMode==='manual'?s.groups:[]),hasGroups=groups.some(g=>g.name);
-  state.productGroup=groups.find(g=>groupKey(g.name)===groupKey(state.productGroup))?.name||'';
-  app.innerHTML=`<button class="back" id="back">← Бренды</button><section class="detail-head"><p class="eyebrow">КАТАЛОГ</p><h1>${esc(s.brand||s.title)}</h1><div class="detail-meta"><span>В продаже<strong>${visible.length} позиций</strong></span></div></section><div class="toolbar"><input class="search" type="search" id="product-search" placeholder="Название, модель или артикул" aria-label="Поиск товара">${hasGroups?`<select id="product-group" aria-label="Группа товаров"><option value="">Все группы</option>${groups.filter(g=>g.name).map(g=>`<option value="${esc(g.name)}">${esc(g.name)} (${g.products.length})</option>`).join('')}</select>`:''}</div><div class="product-groups" id="products"></div>`;
-  if(hasGroups){$('#product-group').value=state.productGroup;$('#product-group').onchange=e=>{state.productGroup=e.target.value;products($('#product-search').value);};}
+  const brand=brandById(s.id)||BRANDS.find(b=>b.name.toLowerCase()===String(s.brand||s.title).toLowerCase());
+  const categories=brand?.categories||[],visible=sellableProducts(s);
+  if(!categories.some(name=>groupKey(name)===groupKey(state.productGroup)))state.productGroup='';
+  if(!state.productGroup){
+    app.innerHTML=`<button class="back" id="back">← Бренды</button><section class="detail-head"><p class="eyebrow">КАТАЛОГ</p><h1>${esc(brand?.name||s.brand||s.title)}</h1><p class="subtitle">Выберите категорию.</p></section><div class="category-grid">${categories.map(name=>{const count=visible.filter(p=>groupKey(p.group)===groupKey(name)).length;return `<button class="category-card" data-category="${esc(name)}"><strong>${esc(name)}</strong><span>${count} товаров</span><span class="arrow" aria-hidden="true">→</span></button>`;}).join('')}</div>`;
+    $('#back').onclick=goBack;
+    document.querySelectorAll('[data-category]').forEach(button=>button.onclick=()=>{state.productGroup=button.dataset.category;render();window.scrollTo(0,0);});
+    loadImages({...s,products:visible});
+    return;
+  }
+  const category=categories.find(name=>groupKey(name)===groupKey(state.productGroup))||state.productGroup;
+  const count=visible.filter(p=>groupKey(p.group)===groupKey(category)).length;
+  app.innerHTML=`<button class="back" id="back">← ${esc(brand?.name||'Категории')}</button><section class="detail-head"><p class="eyebrow">${esc(brand?.name||s.brand||s.title)}</p><h1>${esc(category)}</h1><div class="detail-meta"><span>В продаже<strong>${count} позиций</strong></span></div></section><div class="toolbar"><input class="search" type="search" id="product-search" placeholder="Название, модель или артикул" aria-label="Поиск товара"></div><div id="products"></div>`;
   $('#product-search').oninput=debounce(e=>{if(e.target.isConnected)products(e.target.value);});
-  $('#back').onclick=goBack;products('');loadImages({...s,products:visible});
+  $('#back').onclick=goBack;products('');loadImages({...s,products:visible.filter(p=>groupKey(p.group)===groupKey(category))});
 }
 function products(query){
-  const s=activeShipment(),visible=sellableProducts(s),list=visible.filter(p=>`${p.name} ${p.sku}`.toLowerCase().includes(query.toLowerCase()));
-  const definitions=s.groupingMode==='manual'?s.groups:[],hasGroups=groupProducts(visible,definitions).some(g=>g.name);
-  const groups=groupProducts(list,definitions).filter(g=>!state.productGroup||groupKey(g.name)===groupKey(state.productGroup));
-  $('#products').innerHTML=groups.length?groups.map((group,index)=>`<section class="product-group" ${hasGroups?`aria-labelledby="product-group-${index}"`:''}>${hasGroups?`<div class="group-heading"><h2 id="product-group-${index}">${esc(group.name||'Без группы')}</h2><span class="muted">Позиций: ${group.products.length}</span></div>`:''}<div class="products">${group.products.map(p=>{
+  const s=activeShipment(),category=state.productGroup;
+  const list=sellableProducts(s).filter(p=>groupKey(p.group)===groupKey(category)&&`${p.name} ${p.sku}`.toLowerCase().includes(query.toLowerCase()));
+  $('#products').innerHTML=list.length?`<div class="products">${list.map(p=>{
     const qty=state.cart[p.id]||0,disabled=(!isOpen(s)&&!state.preview)||p.stock<=0;
     return `<article class="product compact-product ${qty?'selected':''}" data-product="${esc(p.id)}">${photo(p)}<div class="product-info"><span class="sku">${esc(p.sku)}</span><p class="product-title">${esc(p.name)}</p><span class="price">${money(p.price)} <small>/ ${esc(p.unit||'шт.')}</small></span><div class="stock">В наличии: ${p.stock}</div></div><div class="product-controls"><div class="stepper"><button data-step="-1" data-id="${esc(p.id)}" aria-label="Уменьшить количество" ${disabled?'disabled':''}>−</button><input data-qty="${esc(p.id)}" type="number" inputmode="numeric" min="0" max="${p.stock}" value="${qty}" aria-label="Количество ${esc(p.sku)}" ${disabled?'disabled':''}><button data-step="1" data-id="${esc(p.id)}" aria-label="Увеличить количество" ${disabled?'disabled':''}>+</button></div><strong class="line-total" data-line-total="${esc(p.id)}">${money(qty*p.price)}</strong></div></article>`;
-  }).join('')}</div></section>`).join(''):'<p class="empty">По этому фильтру товаров нет.</p>';
+  }).join('')}</div>`:'<p class="empty">В этой категории товаров пока нет.</p>';
   document.querySelectorAll('[data-step]').forEach(b=>b.onclick=()=>setQuantity(b.dataset.id,(state.cart[b.dataset.id]||0)+Number(b.dataset.step)));
   document.querySelectorAll('[data-qty]').forEach(input=>input.onchange=()=>setQuantity(input.dataset.qty,Number(input.value)));
   hydrateImages();
@@ -126,25 +138,20 @@ function cartBar(){
 function closeDialog(){importController?.abort();dialog.close();}
 function showDialog(title,body){dialog.innerHTML=`<div class="dialog-header"><h2>${esc(title)}</h2><button class="icon-button" id="close-dialog" aria-label="Закрыть">×</button></div>${body}`;$('#close-dialog').onclick=closeDialog;if(!dialog.open)dialog.showModal();}
 async function showCart(){
-  try{if(!state.preview)state.managers=(await api('/managers')).managers;}catch(e){toast(e.message);return;}
-  if(!state.managers.some(m=>m.id===state.managerId)){state.managerId=null;state.requestKey=null;}
   const s=activeShipment(),t=totals();if(!s || !t.count)return;
-  showDialog('Ваш заказ',`<p class="muted">${esc(s.title)}</p>${Object.entries(state.cart).map(([id,q])=>{const p=s.products.find(p=>p.id===id);return `<div class="cart-line"><p>${esc(p.name)}</p><span class="muted">${esc(p.sku)} · ${q} шт. × ${money(p.price)}</span></div>`;}).join('')}<div class="cart-total"><span>${t.count} шт.</span><span>${money(t.total)}</span></div><label class="field">Ваш менеджер<select id="placeOrder-manager" required><option value="">Выберите менеджера</option>${state.managers.map(m=>`<option value="${esc(m.id)}" ${m.id===state.managerId?'selected':''}>${esc(m.name)}</option>`).join('')}</select></label>${!state.preview&&!state.managers.length?'<p class="warning">Список менеджеров ещё не заполнен. Обратитесь в магазин.</p>':''}<label class="field">Комментарий<textarea id="comment" maxlength="1000" placeholder="Например, название магазина"></textarea></label><p class="fine-print">После оформления количество товара в наличии сразу уменьшится.</p>${state.preview?'<p class="warning">Предпросмотр. Заказ не будет оформлен.</p>':''}<p id="placeOrder-error" class="error" role="alert"></p><button class="primary full" id="submit-placeOrder" ${state.preview||!state.ready||!state.managerId?'disabled':''}>Оформить заказ</button>`);
+  showDialog('Ваш заказ',`<p class="muted">${esc(s.title)}</p>${Object.entries(state.cart).map(([id,q])=>{const p=s.products.find(p=>p.id===id);return `<div class="cart-line"><p>${esc(p.name)}</p><span class="muted">${esc(p.sku)} · ${q} шт. × ${money(p.price)}</span></div>`;}).join('')}<div class="cart-total"><span>${t.count} шт.</span><span>${money(t.total)}</span></div><label class="field">Комментарий<textarea id="comment" maxlength="1000" placeholder="Например, название магазина"></textarea></label><p class="fine-print">После оформления количество товара в наличии сразу уменьшится.</p>${state.preview?'<p class="warning">Предпросмотр. Заказ не будет оформлен.</p>':''}<p id="placeOrder-error" class="error" role="alert"></p><button class="primary full" id="submit-placeOrder" ${state.preview||!state.ready?'disabled':''}>Оформить заказ</button>`);
   $('#comment').oninput=()=>state.requestKey=null;
-  $('#placeOrder-manager').onchange=e=>{state.managerId=e.target.value||null;state.requestKey=null;$('#submit-placeOrder').disabled=state.preview||!state.ready||!state.managerId;};
   $('#submit-placeOrder').onclick=async()=>{
-    if(!state.managerId){$('#placeOrder-error').textContent='Выберите менеджера.';return;}
-    const button=$('#submit-placeOrder');$('#placeOrder-manager').disabled=true;button.disabled=true;button.textContent='Отправляем…';$('#placeOrder-error').textContent='';$('#comment').disabled=true;
+    const button=$('#submit-placeOrder');button.disabled=true;button.textContent='Отправляем…';$('#placeOrder-error').textContent='';$('#comment').disabled=true;
     state.requestKey ||= crypto.randomUUID();
     const key=state.requestKey;
     try{
-      const {order}=await api('/orders','POST',{shipmentId:s.id,requestKey:key,managerId:state.managerId,lines:Object.entries(state.cart).map(([id,quantity])=>({id,quantity})),comment:$('#comment').value});
+      const {order}=await api('/orders','POST',{shipmentId:s.id,requestKey:key,lines:Object.entries(state.cart).map(([id,quantity])=>({id,quantity})),comment:$('#comment').value});
       state.cart={};state.requestKey=null;closeDialog();cartBar();
-      toast(`Заказ №${order.id.slice(0,8)} оформлен. Он появится в канале для менеджера.`);
+      toast(`Заказ №${order.id.slice(0,8)} оформлен и отправлен.`);
       state.shipments=(await api('/catalog')).shipments;state.view='orders';render();
     }catch(e){
-      // Same idempotency key is retained for a network retry, even if response was lost.
-      if(dialog.open&&$('#placeOrder-error')){$('#placeOrder-error').textContent=e.message;button.disabled=false;button.textContent='Повторить отправку';$('#comment').disabled=false;$('#placeOrder-manager').disabled=false;}
+      if(dialog.open&&$('#placeOrder-error')){$('#placeOrder-error').textContent=e.message;button.disabled=false;button.textContent='Повторить отправку';$('#comment').disabled=false;}
       else toast('Проверьте «Мои Заказы»: запрос мог быть выполнен.');
     }
   };
@@ -159,7 +166,7 @@ async function renderOrders(all=false){
     const {orders}=await api('/orders'+(all?'?all=1':''));
     if(!container.isConnected)return;
     state.orders=orders;
-    $('#orders').innerHTML=orders.length?orders.map(r=>`<article class="order"><div class="top"><div><small>№ ${esc(r.id.slice(0,8))} · ${date(r.createdAt)}</small><h3 style="margin-top:8px">${esc(r.shipmentTitle)}</h3></div>${badge(r.status)}</div>${r.editedAt?'<p class="muted">Заказ изменён</p>':''}${all?`<p>${esc(r.user.name)} ${r.user.username?'@'+esc(r.user.username):''}</p>`:''}${r.manager?`<p class="muted">Менеджер: ${esc(r.manager.name)} · @${esc(r.manager.username)}</p>`:''}<strong>${money(r.total)}</strong><span class="muted"> · ${r.lines.reduce((s,l)=>s+l.quantity,0)} шт.</span><details><summary>Состав заказа</summary><ul>${r.lines.map(l=>`<li>${esc(l.sku)} · ${esc(l.name)} — <b>${l.quantity} шт.</b></li>`).join('')}</ul>${r.comment?`<p>${esc(r.comment)}</p>`:''}</details><div class="actions">${r.status==='placed'||all&&r.status==='confirmed'?`<button class="secondary" data-edit-order="${r.id}">Изменить</button>`:''}${all&&r.status==='placed'?`<button class="primary" data-confirm="${r.id}">Подтвердить</button>`:''}${r.status==='placed'||all&&r.status==='confirmed'?`<button class="danger" data-cancel="${r.id}">Отменить заказ</button>`:''}</div></article>`).join(''):'<div class="empty"><strong>Заказов пока нет</strong>Выберите бренд и добавьте нужные товары.</div>';
+    $('#orders').innerHTML=orders.length?orders.map(r=>`<article class="order"><div class="top"><div><small>№ ${esc(r.id.slice(0,8))} · ${date(r.createdAt)}</small><h3 style="margin-top:8px">${esc(r.shipmentTitle)}</h3></div>${badge(r.status)}</div>${r.editedAt?'<p class="muted">Заказ изменён</p>':''}${all?`<p>${esc(r.user.name)} ${r.user.username?'@'+esc(r.user.username):''}</p>`:''}<strong>${money(r.total)}</strong><span class="muted"> · ${r.lines.reduce((s,l)=>s+l.quantity,0)} шт.</span><details><summary>Состав заказа</summary><ul>${r.lines.map(l=>`<li>${esc(l.sku)} · ${esc(l.name)} — <b>${l.quantity} шт.</b></li>`).join('')}</ul>${r.comment?`<p>${esc(r.comment)}</p>`:''}</details><div class="actions">${r.status==='placed'||all&&r.status==='confirmed'?`<button class="secondary" data-edit-order="${r.id}">Изменить</button>`:''}${all&&r.status==='placed'?`<button class="primary" data-confirm="${r.id}">Подтвердить</button>`:''}${r.status==='placed'||all&&r.status==='confirmed'?`<button class="danger" data-cancel="${r.id}">Отменить заказ</button>`:''}</div></article>`).join(''):'<div class="empty"><strong>Заказов пока нет</strong>Выберите бренд и добавьте нужные товары.</div>';
     document.querySelectorAll('[data-edit-order]').forEach(b=>b.onclick=()=>editOrderForm(orders.find(r=>r.id===b.dataset.editOrder),all));
     document.querySelectorAll('[data-cancel]').forEach(b=>b.onclick=()=>changeOrder(b.dataset.cancel,'cancelled',all));
     document.querySelectorAll('[data-confirm]').forEach(b=>b.onclick=()=>changeOrder(b.dataset.confirm,'confirmed',all));
@@ -168,7 +175,7 @@ async function renderOrders(all=false){
 }
 async function editOrderForm(order,all){
   let shipment;
-  try{shipment=(await api('/catalog')).shipments.find(s=>s.id===order.shipmentId);if(!shipment)throw Error('Каталог недоступен. Обратитесь к менеджеру.');}catch(e){toast(e.message);return;}
+  try{shipment=(await api('/catalog')).shipments.find(s=>s.id===order.shipmentId);if(!shipment)throw Error('Каталог недоступен. Обратитесь в магазин.');}catch(e){toast(e.message);return;}
   const originals=new Map(order.lines.map(l=>[l.id,l])),draft=new Map(order.lines.map(l=>[l.id,l.quantity]));
   let requestKey=null;
   showDialog('Изменить заказ',`<p class="muted">${esc(order.shipmentTitle)}</p><p class="fine-print">Поставьте 0, чтобы убрать позицию. Увеличение количества возможно в пределах наличия. Для полного отказа отмените заказ.</p><form id="edit-order-form"><div id="edit-order-lines"></div><label class="field">Добавить товар<select id="add-order-product"><option value="">Выберите товар</option></select></label><p class="fine-print">Цена ранее выбранных позиций сохраняется. Новые позиции добавляются по текущей цене.</p><label class="field">Комментарий<textarea id="edit-order-comment" maxlength="1000">${esc(order.comment)}</textarea></label><p class="cart-total" id="edit-order-total"></p><p id="edit-order-error" class="error" role="alert"></p><button type="button" class="secondary full" id="reload-orders" hidden>Обновить список заказов</button><button class="primary full" type="submit" id="save-order">Сохранить изменения</button></form>`);
@@ -207,10 +214,9 @@ function changeOrder(id,status,all){
 }
 function renderAdmin(){
   if(!state.admin){state.view='shipments';render();return;}
-  app.innerHTML=`<div class="page-heading"><div><p class="eyebrow">EL / STORE</p><h1>Управление</h1><p class="subtitle">Excel обновляет цены и текущие остатки по артикулу. Товары, которых нет в новом файле, скрываются автоматически.</p></div></div><div class="actions"><button class="secondary" id="all-orders">Все заказы</button><button class="secondary" id="managers">Менеджеры</button><button class="secondary" id="setup-bot">Подключить бота</button></div><section class="admin-panel">${BRANDS.map(brand=>{const catalog=catalogForBrand(brand.id),available=sellableProducts(catalog);return `<div class="admin-row"><div><strong>${esc(brand.name)}</strong><small>${available.length} товаров в продаже${catalog?' · каталог загружен':' · Excel ещё не загружен'}</small></div><button class="primary" data-brand-import="${esc(brand.id)}">${catalog?'Обновить Excel':'Загрузить Excel'}</button></div>`;}).join('')}</section>`;
+  app.innerHTML=`<div class="page-heading"><div><p class="eyebrow">EL / STORE</p><h1>Управление</h1><p class="subtitle">Excel обновляет цены и текущие остатки по артикулу. Товары, которых нет в новом файле, скрываются автоматически.</p></div></div><div class="actions"><button class="secondary" id="all-orders">Все заказы</button><button class="secondary" id="setup-bot">Подключить бота</button></div><section class="admin-panel">${BRANDS.map(brand=>{const catalog=catalogForBrand(brand.id),available=sellableProducts(catalog);return `<div class="admin-row"><div><strong>${esc(brand.name)}</strong><small>${brand.categories.map(esc).join(' · ')}</small><small>${available.length} товаров в продаже${catalog?' · каталог загружен':' · Excel ещё не загружен'}</small></div><button class="primary" data-brand-import="${esc(brand.id)}">${catalog?'Обновить Excel':'Загрузить Excel'}</button></div>`;}).join('')}</section>`;
   $('#all-orders').onclick=()=>{state.view='all-orders';render();};
   $('#setup-bot').onclick=showBotSetup;
-  $('#managers').onclick=editManagers;
   document.querySelectorAll('[data-brand-import]').forEach(b=>{const brand=brandById(b.dataset.brandImport);b.onclick=()=>editShipment(catalogForBrand(brand.id),brand);});
 }
 function deleteShipment(shipment){
@@ -224,25 +230,6 @@ function deleteShipment(shipment){
       if(state.current===shipment.id){state.current=null;state.cart={};state.requestKey=null;}
       closeDialog();render();toast('Каталог удалён.');
     }catch(e){error.textContent=e.message;button.disabled=false;}
-  };
-}
-async function editManagers(){
-  let list;
-  try{list=(await api('/managers')).managers;}catch(e){toast(e.message);return;}
-  showDialog('Менеджеры',`<p class="fine-print">Клиент выбирает имя при оформлении. Telegram-ник добавляется в сообщение с заказом.</p><form id="managers-form"><div id="manager-rows"></div><button type="button" class="secondary" id="add-manager">+ Менеджер</button><p class="fine-print">Удаление менеджера убирает его из выбора для новых заказов. В оформленных заказах сохраняются прежние имя и ник.</p><p class="error" id="managers-error" role="alert"></p><button class="primary full" type="submit">Сохранить менеджеров</button></form>`);
-  const form=$('#managers-form');
-  function addRow(m={id:crypto.randomUUID(),name:'',username:''}){
-    const row=document.createElement('div');row.className='manager-editor';row.dataset.managerId=m.id;
-    row.innerHTML=`<label class="field">Имя<input data-manager-name required maxlength="80" value="${esc(m.name)}" placeholder="Например, Анна"></label><label class="field">Telegram-ник<input data-manager-username required maxlength="33" value="${esc(m.username?'@'+m.username:'')}" placeholder="@username" autocapitalize="none" spellcheck="false" pattern="@?[A-Za-z][A-Za-z0-9_]{0,31}"></label><button type="button" class="danger">Удалить</button>`;
-    row.querySelector('button').onclick=()=>row.remove();$('#manager-rows').append(row);
-  }
-  list.forEach(addRow);if(!list.length)addRow();$('#add-manager').onclick=()=>{if(form.querySelectorAll('.manager-editor').length<100)addRow();};
-  form.onsubmit=async e=>{
-    e.preventDefault();const error=$('#managers-error');error.textContent='';
-    const managers=[...form.querySelectorAll('.manager-editor')].map(row=>({id:row.dataset.managerId,name:row.querySelector('[data-manager-name]').value,username:row.querySelector('[data-manager-username]').value}));
-    const controls=[...form.querySelectorAll('input,button')];controls.forEach(c=>c.disabled=true);
-    try{state.managers=(await api('/admin/managers','PUT',{managers})).managers;closeDialog();toast('Список менеджеров сохранён.');}
-    catch(e){error.textContent=e.message;controls.forEach(c=>c.disabled=false);}
   };
 }
 function showBotSetup(){
@@ -259,25 +246,28 @@ function editShipment(existing,brand){
   importController?.abort();
   brand ||= BRANDS.find(b=>b.id===existing?.id)||BRANDS.find(b=>b.name.toLowerCase()===String(existing?.brand||'').toLowerCase());
   if(!brand){toast('Не удалось определить бренд.');return;}
-  const groups=existing?.groupingMode==='manual'?[...(existing.groups||[])]:[];
-  let products=existing?manualProducts(existing.products.filter(p=>!p.hidden&&p.stock>0).map(p=>({...p,stock:p.stock})),groups):null,warnings=[],previousProducts=products||[];
-  showDialog(`${brand.name} — каталог`,`<form id="shipment-form"><p class="fine-print">Загрузите актуальный Excel. Совпадение идёт по артикулу: цена и остаток обновятся, отсутствующие в новом файле товары будут скрыты.</p><label class="field">${existing?'Обновить каталог из Excel':'Excel с товарами'}<input type="file" id="xlsx-file" accept=".xls,.xlsx" ${existing?'':'required'}></label><div id="import-info">${products?`<p class="import-summary">Сейчас в продаже: ${products.length} позиций</p>`:''}</div><div id="group-editor"></div><p id="import-error" class="error" role="alert"></p><button class="primary full" id="save-shipment" type="submit" ${products?'':'disabled'}>Сохранить каталог</button></form>`);
+  const groups=[...brand.categories],historyProducts=existing?.products||[];
+  let products=existing?manualProducts(existing.products.filter(p=>!p.hidden&&p.stock>0).map(p=>({...p,stock:p.stock})),groups):null,warnings=[];
+  showDialog(`${brand.name} — каталог`,`<form id="shipment-form"><p class="fine-print">Загрузите актуальный Excel. Совпадение идёт по артикулу: цена и остаток обновятся, отсутствующие в новом файле товары будут скрыты.</p><p class="fine-print"><strong>Категории:</strong> ${groups.map(esc).join(' · ')}</p><label class="field">${existing?'Обновить каталог из Excel':'Excel с товарами'}<input type="file" id="xlsx-file" accept=".xls,.xlsx" ${existing?'':'required'}></label><div id="import-info">${products?`<p class="import-summary">Сейчас в продаже: ${products.length} позиций</p>`:''}</div><div id="category-editor"></div><p id="import-error" class="error" role="alert"></p><button class="primary full" id="save-shipment" type="submit" ${products?'':'disabled'}>Сохранить каталог</button></form>`);
   const form=$('#shipment-form');
-  function reviewGroups(){mountGroupEditor($('#group-editor'),products,groups);}
-  if(products)reviewGroups();
+  function reviewCategories(){
+    const container=$('#category-editor');if(!products){container.textContent='';return;}
+    container.innerHTML=`<section class="category-review"><h3>Распределение по категориям</h3><p class="fine-print">Для каждого товара выберите одну из категорий ${esc(brand.name)}.</p><div class="category-editor-products">${products.map(p=>`<label class="category-editor-product"><span><strong>${esc(p.name)}</strong><small>${esc(p.sku)}</small></span><select data-product-category="${esc(p.id)}" required><option value="">Не выбрано</option>${groups.map(name=>`<option value="${esc(name)}" ${groupKey(p.group)===groupKey(name)?'selected':''}>${esc(name)}</option>`).join('')}</select></label>`).join('')}</div></section>`;
+    container.querySelectorAll('[data-product-category]').forEach(select=>select.onchange=()=>{const p=products.find(x=>x.id===select.dataset.productCategory);if(p)p.group=select.value;});
+  }
+  if(products)reviewCategories();
   $('#xlsx-file').onchange=async e=>{
     const file=e.target.files[0];if(!file)return;
     importController?.abort();const controller=new AbortController();importController=controller;
-    if(products)previousProducts=products;
-    products=null;warnings=[];$('#group-editor').textContent='';
+    products=null;warnings=[];$('#category-editor').textContent='';
     $('#save-shipment').disabled=true;$('#import-info').textContent='Читаем Excel и сжимаем фотографии…';$('#import-error').textContent='';
     try{
       const result=await readSupplierExcel(file,{signal:controller.signal});
       if(controller.signal.aborted||!form.isConnected)return;
-      const previousById=new Map(previousProducts.map(p=>[p.id,p]));
-      const merged=result.products.map(p=>{const old=previousById.get(p.id);return {...p,image:p.image||old?.image||null,imageKey:p.imageKey||old?.imageKey||null};});
-      products=manualProducts(merged,groups,previousProducts);warnings=result.warnings;reviewGroups();
-      const previousIds=new Set(previousProducts.map(p=>p.id)),nextIds=new Set(products.map(p=>p.id));
+      const previousById=new Map(historyProducts.map(p=>[p.id,p]));
+      const merged=result.products.map(p=>{const old=previousById.get(p.id);return {...p,group:old?.group||'',image:p.image||old?.image||null,imageKey:p.imageKey||old?.imageKey||null};});
+      products=manualProducts(merged,groups,historyProducts);warnings=result.warnings;reviewCategories();
+      const previousIds=new Set(historyProducts.filter(p=>!p.hidden).map(p=>p.id)),nextIds=new Set(products.map(p=>p.id));
       const hidden=[...previousIds].filter(id=>!nextIds.has(id)).length;
       $('#import-info').innerHTML=`<div class="import-summary">${products.length} позиций · ${products.filter(p=>p.image||p.imageKey).length} фотографий${hidden?` · будет скрыто: ${hidden}`:''}</div>${warnings.length?`<details class="warning"><summary>Замечания: ${warnings.length}</summary>${warnings.map(w=>`<div>${esc(w)}</div>`).join('')}</details><label class="field"><input id="accept-warnings" type="checkbox" style="width:auto;min-height:auto"> Проверил замечания</label>`:''}<div class="import-preview"><table><thead><tr><th>Товар</th><th>Остаток</th><th>Цена</th></tr></thead><tbody>${products.map(p=>`<tr><td>${esc(p.name)}<br>${esc(p.sku)}</td><td>${p.stock}</td><td>${p.price===null?`<input data-import-price="${esc(p.id)}" type="number" inputmode="decimal" required min="0" max="1000000" step="0.01" placeholder="Цена, ₽" aria-label="Цена ${esc(p.sku)}">`:money(p.price)}</td></tr>`).join('')}</tbody></table></div>`;
       form.querySelectorAll('[data-import-price]').forEach(input=>input.oninput=()=>{const product=products.find(p=>p.id===input.dataset.importPrice);product.price=input.value.trim()&&input.validity.valid?Math.round(Number(input.value)*100):null;});
@@ -287,6 +277,7 @@ function editShipment(existing,brand){
   form.onsubmit=async e=>{
     e.preventDefault();if(!products)return;
     if(products.some(p=>p.price===null)){$('#import-error').textContent='Заполните цены всех товаров перед сохранением.';return;}
+    if(products.some(p=>!groups.some(name=>groupKey(name)===groupKey(p.group)))){$('#import-error').textContent='Выберите категорию для каждого товара.';return;}
     if(warnings.length&&!$('#accept-warnings')?.checked){$('#import-error').textContent='Подтвердите проверку замечаний.';return;}
     const b=$('#save-shipment');b.disabled=true;$('#import-error').textContent='';
     try{
@@ -295,7 +286,11 @@ function editShipment(existing,brand){
     }catch(e){if($('#import-error')){$('#import-error').textContent=e.message;b.disabled=false;}else toast(e.message);}
   };
 }
-function goBack(){if(Object.keys(state.cart).length){showDialog('Вернуться к брендам?',`<p>Выбранные количества будут сброшены.</p><button class="primary full" id="leave">Вернуться</button>`);$('#leave').onclick=()=>{closeDialog();state.cart={};state.current=null;state.requestKey=null;render();};}else{state.current=null;render();}}
+function goBack(){
+  if(state.current&&state.productGroup){state.productGroup='';render();window.scrollTo(0,0);return;}
+  if(Object.keys(state.cart).length){showDialog('Вернуться к брендам?',`<p>Выбранные количества будут сброшены.</p><button class="primary full" id="leave">Вернуться</button>`);$('#leave').onclick=()=>{closeDialog();state.cart={};state.current=null;state.productGroup='';state.requestKey=null;render();};}
+  else{state.current=null;state.productGroup='';render();}
+}
 async function refresh({background=false}={}){
   if(state.preview){if(!background)render();return;}
   if(background&&document.activeElement?.matches('[data-qty]'))return;
