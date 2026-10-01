@@ -20,7 +20,7 @@ export class Inventory {
     sql.exec('CREATE INDEX IF NOT EXISTS orders_shipment_status ON orders(shipment,status)');
     // Manager assignment was removed from EL Store. Delete its old table and strip legacy order snapshots.
     sql.exec('DROP TABLE IF EXISTS managers');
-    for(const row of sql.exec('SELECT id,data FROM orders')) {
+    for(const row of [...sql.exec('SELECT id,data FROM orders')]) {
       const data=JSON.parse(row.data);
       if(Object.prototype.hasOwnProperty.call(data,'manager')) {
         delete data.manager;
