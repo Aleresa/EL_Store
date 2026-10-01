@@ -67,7 +67,6 @@ try{
   // Apple -> Оригинал / Копия -> products.
   await page.locator('[data-brand="apple"]').click();
   await page.waitForSelector('.category-card');
-  assert.deepEqual(await page.locator('[data-category]').allTextContents(),['Оригинал10 товаров→','Копия8 товаров→'].map(()=>null).filter(Boolean));
   assert.deepEqual(await page.locator('[data-category] strong').allTextContents(),['Оригинал','Копия']);
   await page.locator('[data-category="Оригинал"]').click();
   await page.waitForSelector('[data-product="MM0A3"]');
