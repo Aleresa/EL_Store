@@ -106,8 +106,8 @@ export class NewsletterStore {
     try {
       await telegramWithDnsRetry(this.env,'setWebhook',{url:appUrl+'/telegram/webhook',secret_token:secret,allowed_updates:['message']});
       await Promise.all([
-        telegram(this.env,'setChatMenuButton',{menu_button:{type:'web_app',text:'Поступление',web_app:{url:appUrl}}}),
-        telegram(this.env,'setMyCommands',{commands:[{command:'start',description:'Открыть поступления'},{command:'id',description:'Узнать свой Telegram ID'},{command:'admin',description:'Управление поступлениями'}]})
+        telegram(this.env,'setChatMenuButton',{menu_button:{type:'web_app',text:'Товары',web_app:{url:appUrl}}}),
+        telegram(this.env,'setMyCommands',{commands:[{command:'start',description:'Открыть товары'},{command:'id',description:'Узнать свой Telegram ID'},{command:'admin',description:'Управление магазином'}]})
       ]);
     } catch(error) {
       const detail=String(error?.telegramDescription||'').trim();
@@ -185,12 +185,12 @@ export class NewsletterStore {
       const command=(message.text || '').split(' ')[0];
       let text=null;
       if(command==='/id') text=`Ваш Telegram ID: ${message.from.id}`;
-      if(command==='/start') text='Откройте поступления, выберите товары и оформите заказ. Свободное количество обновляется после каждого заказа.';
+      if(command==='/start') text='Откройте товары, выберите бренд и оформите заказ. Остатки обновляются после каждого заказа и загрузки Excel.';
       const admin=isAdmin({id:message.from.id},this.env);
-      if(command==='/admin' && admin) text='Откройте приложение → Управление. Здесь можно загрузить Excel, опубликовать поступление и обработать заказы.';
+      if(command==='/admin' && admin) text='Откройте приложение → Управление. Здесь можно обновить каталоги Apple, Remax и Gurdini из Excel, настроить менеджеров и обработать заказы.';
       if(message.forward_origin?.type==='channel' && admin) text=`ID канала: ${message.forward_origin.chat.id}\nДобавьте бота администратором с правом публикации, затем укажите этот ID в ORDER_CHAT_ID.`;
-      if(message.document && admin) text='Для загрузки Excel откройте приложение → Управление → Новое поступление. Импорт покажет ошибки и позволит проверить данные до публикации.';
-      if(text) await telegram(this.env,'sendMessage',{chat_id:message.chat.id,text,reply_markup:{inline_keyboard:[[{text:'Открыть поступления',url:this.env.MINI_APP_URL || 'https://el-store.elereas.workers.dev'}]]}});
+      if(message.document && admin) text='Для обновления каталога откройте приложение → Управление → нужный бренд → Загрузить/Обновить Excel.';
+      if(text) await telegram(this.env,'sendMessage',{chat_id:message.chat.id,text,reply_markup:{inline_keyboard:[[{text:'Открыть товары',url:this.env.MINI_APP_URL || 'https://el-store.elereas.workers.dev'}]]}});
     }
     this.inventory.sql.exec('INSERT OR IGNORE INTO bot_updates(id) VALUES(?)',update.update_id);
     this.inventory.sql.exec('DELETE FROM bot_updates WHERE id < ?',update.update_id-10000);
