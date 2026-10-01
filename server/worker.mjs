@@ -173,7 +173,7 @@ export class NewsletterStore {
       if(command==='/admin' && admin) text='Откройте приложение → Управление. Здесь можно загрузить Excel, опубликовать поступление и обработать заказы.';
       if(message.forward_origin?.type==='channel' && admin) text=`ID канала: ${message.forward_origin.chat.id}\nДобавьте бота администратором с правом публикации, затем укажите этот ID в ORDER_CHAT_ID.`;
       if(message.document && admin) text='Для загрузки Excel откройте приложение → Управление → Новое поступление. Импорт покажет ошибки и позволит проверить данные до публикации.';
-      if(text) await telegram(this.env,'sendMessage',{chat_id:message.chat.id,text,reply_markup:{inline_keyboard:[[{text:'Открыть поступления',url:this.env.MINI_APP_URL || 'https://t.me/EL_Store_Bot'}]]}});
+      if(text) await telegram(this.env,'sendMessage',{chat_id:message.chat.id,text,reply_markup:{inline_keyboard:[[{text:'Открыть поступления',url:this.env.MINI_APP_URL || 'https://el-store.elereas.workers.dev'}]]}});
     }
     this.inventory.sql.exec('INSERT OR IGNORE INTO bot_updates(id) VALUES(?)',update.update_id);
     this.inventory.sql.exec('DELETE FROM bot_updates WHERE id < ?',update.update_id-10000);
