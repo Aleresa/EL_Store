@@ -5,6 +5,7 @@ import {brandById} from '../public/catalog-config.js';
 const ACTIVE = new Set(['arrived']);
 const STATUSES = new Set(['draft','arrived','closed']);
 const validId = x => typeof x === 'string' && /^[a-zA-Z0-9_-]{1,80}$/.test(x);
+const lineKey = l => `${l.shipmentId}:${l.id}`;
 const trim = (s,n) => typeof s === 'string' ? s.trim().slice(0,n) : '';
 
 export class Inventory {
@@ -87,7 +88,7 @@ export class Inventory {
         this.sql.exec('INSERT INTO shipments(id,data) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data',shipment.id,JSON.stringify(shipment));
         for(const p of products) {
           const existing=byId.get(p.id),placed=existing?.placed||0,total=p.stock+placed;
-          const stored={...p,hidden:false};
+          const stored={...p,addedAt:existing?(JSON.parse(existing.data).addedAt||previous?.publishedAt||'1970-01-01'):new Date().toISOString(),hidden:false};
           this.sql.exec('INSERT INTO products(shipment,id,data,total) VALUES(?,?,?,?) ON CONFLICT(shipment,id) DO UPDATE SET data=excluded.data,total=excluded.total',shipment.id,p.id,JSON.stringify(stored),total);
         }
         for(const row of current) if(!ids.has(row.id)) {
@@ -96,7 +97,7 @@ export class Inventory {
           this.sql.exec('UPDATE products SET data=?,total=? WHERE shipment=? AND id=?',JSON.stringify(hidden),row.placed,shipment.id,row.id);
         }
       } else {
-        const current=this.rows('SELECT id,placed FROM products WHERE shipment=?',shipment.id);
+        const current=this.rows('SELECT id,placed,data FROM products WHERE shipment=?',shipment.id);
         for(const p of current) if(p.placed && !ids.has(p.id)) throw new ApiError(409,'Нельзя удалить товар с действующими заказами.');
         const byId=new Map(current.map(p=>[p.id,p]));
         for(const p of products) {
@@ -104,89 +105,101 @@ export class Inventory {
           if((existing?.placed || 0)>p.total) throw new ApiError(409,`${p.sku}: количество меньше уже оформленного в заказах.`);
         }
         this.sql.exec('INSERT INTO shipments(id,data) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data',shipment.id,JSON.stringify(shipment));
-        for(const p of products) this.sql.exec('INSERT INTO products(shipment,id,data,total) VALUES(?,?,?,?) ON CONFLICT(shipment,id) DO UPDATE SET data=excluded.data,total=excluded.total',shipment.id,p.id,JSON.stringify(p),p.total);
+        for(const p of products) this.sql.exec('INSERT INTO products(shipment,id,data,total) VALUES(?,?,?,?) ON CONFLICT(shipment,id) DO UPDATE SET data=excluded.data,total=excluded.total',shipment.id,p.id,JSON.stringify({...p,addedAt:byId.has(p.id)?(JSON.parse(byId.get(p.id).data).addedAt||previous?.publishedAt||'1970-01-01'):new Date().toISOString()}),p.total);
         for(const p of current) if(!ids.has(p.id)) this.sql.exec('DELETE FROM products WHERE shipment=? AND id=?',shipment.id,p.id);
       }
       return shipment;
     });
   }
-  placeOrder(user,input) {
-    if(!validId(input.shipmentId) || !validId(input.requestKey) || !Array.isArray(input.lines) || !input.lines.length || input.lines.length>100) throw new ApiError(400,'Выберите от 1 до 100 позиций.');
+  normalizeLines(input,fallback) {
+    if(!Array.isArray(input.lines)||!input.lines.length||input.lines.length>100)throw new ApiError(400,'Выберите от 1 до 100 позиций.');
     const seen=new Set();
-    const lines=input.lines.map(l=>{
-      if(!validId(l.id) || seen.has(l.id) || !Number.isSafeInteger(l.quantity) || l.quantity<1 || l.quantity>10000000) throw new ApiError(400,'Некорректное количество или повтор товара.');
-      seen.add(l.id); return {id:l.id,quantity:l.quantity};
-    }).sort((a,b)=>a.id.localeCompare(b.id));
-    const comment=trim(input.comment,1000);
+    return input.lines.map(l=>{
+      const shipmentId=l?.shipmentId??fallback,key=lineKey({shipmentId,id:l?.id});
+      if(!l||!validId(shipmentId)||!validId(l.id)||seen.has(key)||!Number.isSafeInteger(l.quantity)||l.quantity<1||l.quantity>10000000)throw new ApiError(400,'Некорректное количество или повтор товара.');
+      if(l.expectedPrice!==undefined&&(!Number.isSafeInteger(l.expectedPrice)||l.expectedPrice<0||l.expectedPrice>100000000))throw new ApiError(400,'Некорректная цена.');
+      seen.add(key);
+      return {id:l.id,quantity:l.quantity,...(l.shipmentId!==undefined?{shipmentId}:{}),...(l.expectedPrice!==undefined?{expectedPrice:l.expectedPrice}:{})};
+    }).sort((a,b)=>(a.shipmentId||'').localeCompare(b.shipmentId||'')||a.id.localeCompare(b.id));
+  }
+  placeOrder(user,input) {
+    if(!validId(input.requestKey))throw new ApiError(400,'Некорректный ключ заказа.');
+    const lines=this.normalizeLines(input,input.shipmentId),comment=trim(input.comment,1000);
+    const explicitBrands=lines.some(l=>l.shipmentId!==undefined);
+    // Keep the legacy fingerprint format so retries from already-open clients still work.
     const fingerprint=JSON.stringify({shipment:input.shipmentId,lines,comment});
     return this.transaction(()=>{
       const previous=this.one('SELECT * FROM orders WHERE user_id=? AND request_key=?',user.id,input.requestKey);
       if(previous) {
-        if(previous.fingerprint!==fingerprint) throw new ApiError(409,'Повтор запроса с другим содержимым.');
+        if(previous.fingerprint!==fingerprint)throw new ApiError(409,'Повтор запроса с другим содержимым.');
         const {manager,...data}=JSON.parse(previous.data);
         return {...data,status:previous.status,repeated:true};
       }
-      const shipmentRow=this.one('SELECT data FROM shipments WHERE id=?',input.shipmentId);
-      const shipment=shipmentRow && JSON.parse(shipmentRow.data);
-      if(!shipment || !brandById(shipment.id) || !ACTIVE.has(shipment.status)) throw new ApiError(409,'Заказы по этому каталогу закрыты.');
+      const catalogs=new Map();
       const detailed=lines.map(l=>{
-        const row=this.one('SELECT * FROM products WHERE shipment=? AND id=?',input.shipmentId,l.id);
-        if(!row) throw new ApiError(409,'Товар больше не доступен.');
+        const shipmentId=l.shipmentId??input.shipmentId;
+        const shipmentRow=this.one('SELECT data FROM shipments WHERE id=?',shipmentId);
+        const shipment=shipmentRow&&JSON.parse(shipmentRow.data);
+        if(!shipment||!brandById(shipmentId)||!ACTIVE.has(shipment.status))throw new ApiError(409,'Заказы по этому каталогу закрыты.');
+        catalogs.set(shipmentId,shipment.title);
+        const row=this.one('SELECT * FROM products WHERE shipment=? AND id=?',shipmentId,l.id);
+        if(!row)throw new ApiError(409,'Товар больше не доступен.');
         const product=JSON.parse(row.data);
-        if(product.hidden) throw new ApiError(409,'Товар больше не доступен.');
-        if(row.total-row.placed<l.quantity) throw new ApiError(409,`${product.sku}: свободно ${row.total-row.placed} шт. Обновите количество.`);
-        return {id:l.id,sku:product.sku,name:product.name,quantity:l.quantity,price:product.price};
+        if(product.hidden)throw new ApiError(409,'Товар больше не доступен.');
+        if(row.total-row.placed<l.quantity)throw new ApiError(409,`${product.sku}: свободно ${row.total-row.placed} шт. Проверьте корзину.`);
+        if(l.expectedPrice!==undefined&&l.expectedPrice!==product.price)throw new ApiError(409,`${product.sku}: цена изменилась. Проверьте корзину.`);
+        return {id:l.id,...(explicitBrands?{shipmentId,shipmentTitle:shipment.title}:{}),sku:product.sku,name:product.name,quantity:l.quantity,price:product.price};
       });
-      const data={id:crypto.randomUUID(),shipmentId:shipment.id,shipmentTitle:shipment.title,user,lines:detailed,comment,status:'placed',revision:1,createdAt:new Date().toISOString(),total:detailed.reduce((sum,l)=>sum+l.price*l.quantity,0)};
-      if(!Number.isSafeInteger(data.total)) throw new ApiError(400,'Слишком большая сумма.');
-      for(const l of detailed) this.sql.exec('UPDATE products SET placed=placed+? WHERE shipment=? AND id=?',l.quantity,shipment.id,l.id);
-      this.sql.exec('INSERT INTO orders(id,user_id,request_key,fingerprint,shipment,status,data) VALUES(?,?,?,?,?,?,?)',data.id,user.id,input.requestKey,fingerprint,shipment.id,data.status,JSON.stringify(data));
-      this.enqueue(data,'created');
-      return data;
+      const shipmentIds=[...catalogs.keys()],shipmentId=shipmentIds.length===1?shipmentIds[0]:'mixed';
+      const data={id:crypto.randomUUID(),shipmentId,shipmentIds,shipmentTitle:[...catalogs.values()].join(' + '),user,lines:detailed,comment,status:'placed',revision:1,createdAt:new Date().toISOString(),total:detailed.reduce((sum,l)=>sum+l.price*l.quantity,0)};
+      if(!Number.isSafeInteger(data.total))throw new ApiError(400,'Слишком большая сумма.');
+      for(const l of detailed)this.sql.exec('UPDATE products SET placed=placed+? WHERE shipment=? AND id=?',l.quantity,l.shipmentId??shipmentId,l.id);
+      this.sql.exec('INSERT INTO orders(id,user_id,request_key,fingerprint,shipment,status,data) VALUES(?,?,?,?,?,?,?)',data.id,user.id,input.requestKey,fingerprint,shipmentId,data.status,JSON.stringify(data));
+      this.enqueue(data,'created');return data;
     });
   }
   editOrder(user,id,input,admin=false) {
-    if(!validId(input.requestKey) || !Number.isSafeInteger(input.expectedRevision) || input.expectedRevision<1 || !Array.isArray(input.lines) || !input.lines.length || input.lines.length>100) throw new ApiError(400,'Оставьте от 1 до 100 позиций. Для полного отказа отмените заказ.');
-    const seen=new Set();
-    const lines=input.lines.map(l=>{
-      if(!l || !validId(l.id) || seen.has(l.id) || !Number.isSafeInteger(l.quantity) || l.quantity<1 || l.quantity>10000000) throw new ApiError(400,'Некорректное количество или повтор товара.');
-      seen.add(l.id);return {id:l.id,quantity:l.quantity};
-    }).sort((a,b)=>a.id.localeCompare(b.id));
-    const comment=trim(input.comment,1000),fingerprint=JSON.stringify({id,revision:input.expectedRevision,lines,comment});
+    if(!validId(input.requestKey)||!Number.isSafeInteger(input.expectedRevision)||input.expectedRevision<1)throw new ApiError(400,'Некорректный запрос изменения заказа.');
     return this.transaction(()=>{
       const row=this.one('SELECT * FROM orders WHERE id=?',id);
-      if(!row || (!admin && row.user_id!==user.id)) throw new ApiError(404,'Заказ не найден.');
-      const storedPrevious=JSON.parse(row.data),{manager:legacyManager,...previous}=storedPrevious,revision=previous.revision||1;
+      if(!row||(!admin&&row.user_id!==user.id))throw new ApiError(404,'Заказ не найден.');
+      const {manager,...previous}=JSON.parse(row.data),revision=previous.revision||1;
+      const lines=this.normalizeLines(input,row.shipment),comment=trim(input.comment,1000);
+      const fingerprint=JSON.stringify({id,revision:input.expectedRevision,lines,comment});
       const retry=this.one('SELECT fingerprint FROM order_edits WHERE user_id=? AND request_key=?',user.id,input.requestKey);
       if(retry){
-        if(retry.fingerprint!==fingerprint) throw new ApiError(409,'Повтор запроса с другим содержимым.');
+        if(retry.fingerprint!==fingerprint)throw new ApiError(409,'Повтор запроса с другим содержимым.');
         return {...previous,status:row.status,repeated:true};
       }
-      if(row.status==='cancelled' || (!admin && row.status==='confirmed')) throw new ApiError(409,'Этот заказ нельзя изменить. Для подтверждённого заказа обратитесь в магазин.');
-      if(revision!==input.expectedRevision) throw new ApiError(409,'Заказ уже изменён. Обновите список заказов и откройте его заново.');
-      const shipmentRow=this.one('SELECT data FROM shipments WHERE id=?',row.shipment);
-      if(!shipmentRow || (!admin && !ACTIVE.has(JSON.parse(shipmentRow.data).status))) throw new ApiError(409,'Изменение этого каталога закрыто. Обратитесь в магазин.');
-      const old=new Map(previous.lines.map(l=>[l.id,l]));
-      const detailed=lines.map(l=>{
-        const productRow=this.one('SELECT * FROM products WHERE shipment=? AND id=?',row.shipment,l.id);
-        if(!productRow) throw new ApiError(409,'Товар больше не доступен.');
-        const product=JSON.parse(productRow.data),existing=old.get(l.id);
+      if(row.status==='cancelled'||(!admin&&row.status==='confirmed'))throw new ApiError(409,'Этот заказ нельзя изменить. Для подтверждённого заказа обратитесь в магазин.');
+      if(revision!==input.expectedRevision)throw new ApiError(409,'Заказ уже изменён. Обновите список заказов и откройте его заново.');
+      const old=new Map(previous.lines.map(l=>{const item={...l,shipmentId:l.shipmentId??row.shipment};return [lineKey(item),item];}));
+      const catalogs=new Map();
+      const detailed=lines.map(line=>{
+        const l={...line,shipmentId:line.shipmentId??row.shipment};
+        const shipmentRow=this.one('SELECT data FROM shipments WHERE id=?',l.shipmentId),shipment=shipmentRow&&JSON.parse(shipmentRow.data);
+        if(!shipment||(!admin&&(!brandById(l.shipmentId)||!ACTIVE.has(shipment.status))))throw new ApiError(409,'Изменение этого каталога закрыто. Обратитесь в магазин.');
+        catalogs.set(l.shipmentId,shipment.title);
+        const productRow=this.one('SELECT * FROM products WHERE shipment=? AND id=?',l.shipmentId,l.id);
+        if(!productRow)throw new ApiError(409,'Товар больше не доступен.');
+        const product=JSON.parse(productRow.data),existing=old.get(lineKey(l));
+        if(product.hidden&&!existing)throw new ApiError(409,'Товар больше не доступен.');
         const available=productRow.total-productRow.placed+(existing?.quantity||0);
-        if(l.quantity>available) throw new ApiError(409,`${product.sku}: можно оставить максимум ${available} шт. с учётом вашего заказа.`);
-        // Preserve the agreed unit price for existing lines; new products use the current server price.
-        return {id:l.id,sku:existing?.sku||product.sku,name:existing?.name||product.name,quantity:l.quantity,price:existing?.price??product.price};
+        if(l.quantity>available)throw new ApiError(409,`${product.sku}: можно оставить максимум ${available} шт. с учётом вашего заказа.`);
+        if(!existing&&l.expectedPrice!==undefined&&l.expectedPrice!==product.price)throw new ApiError(409,'Цена изменилась. Откройте заказ заново.');
+        return {id:l.id,shipmentId:l.shipmentId,shipmentTitle:shipment.title,sku:existing?.sku||product.sku,name:existing?.name||product.name,quantity:l.quantity,price:existing?.price??product.price};
       });
-      const data={...previous,lines:detailed,comment,status:row.status,revision:revision+1,editedAt:new Date().toISOString(),total:detailed.reduce((sum,l)=>sum+l.price*l.quantity,0)};
-      if(!Number.isSafeInteger(data.total)) throw new ApiError(400,'Слишком большая сумма.');
-      const next=new Map(detailed.map(l=>[l.id,l.quantity]));
-      for(const productId of new Set([...old.keys(),...next.keys()])) {
-        const delta=(next.get(productId)||0)-(old.get(productId)?.quantity||0);
-        if(delta)this.sql.exec('UPDATE products SET placed=placed+? WHERE shipment=? AND id=?',delta,row.shipment,productId);
+      const shipmentIds=[...catalogs.keys()],shipmentId=shipmentIds.length===1?shipmentIds[0]:'mixed';
+      const data={...previous,shipmentId,shipmentIds,shipmentTitle:[...catalogs.values()].join(' + '),lines:detailed,comment,status:row.status,revision:revision+1,editedAt:new Date().toISOString(),total:detailed.reduce((sum,l)=>sum+l.price*l.quantity,0)};
+      if(!Number.isSafeInteger(data.total))throw new ApiError(400,'Слишком большая сумма.');
+      const next=new Map(detailed.map(l=>[lineKey(l),l]));
+      for(const key of new Set([...old.keys(),...next.keys()])) {
+        const l=next.get(key)||old.get(key),delta=(next.get(key)?.quantity||0)-(old.get(key)?.quantity||0);
+        if(delta)this.sql.exec('UPDATE products SET placed=placed+? WHERE shipment=? AND id=?',delta,l.shipmentId,l.id);
       }
-      this.sql.exec('UPDATE orders SET data=? WHERE id=?',JSON.stringify(data),id);
+      this.sql.exec('UPDATE orders SET shipment=?,data=? WHERE id=?',shipmentId,JSON.stringify(data),id);
       this.sql.exec('INSERT INTO order_edits(user_id,request_key,fingerprint) VALUES(?,?,?)',user.id,input.requestKey,fingerprint);
-      this.enqueue(data,'edited');
-      return data;
+      this.enqueue(data,'edited');return data;
     });
   }
   orders(user,admin=false) {
@@ -202,7 +215,7 @@ export class Inventory {
       if(row.status===status) return {...data,status};
       if(expectedRevision!==undefined && expectedRevision!==(data.revision||1)) throw new ApiError(409,'Заказ уже изменён. Обновите список заказов.');
       if(row.status==='cancelled' || (!admin && row.status==='confirmed')) throw new ApiError(409,'Для изменения подтверждённого заказа свяжитесь с магазином.');
-      if(status==='cancelled') for(const l of data.lines) this.sql.exec('UPDATE products SET placed=placed-? WHERE shipment=? AND id=?',l.quantity,data.shipmentId,l.id);
+      if(status==='cancelled') for(const l of data.lines) this.sql.exec('UPDATE products SET placed=placed-? WHERE shipment=? AND id=?',l.quantity,l.shipmentId??data.shipmentId,l.id);
       const updated={...data,status,revision:(data.revision||1)+1};
       this.sql.exec('UPDATE orders SET status=?,data=? WHERE id=?',status,JSON.stringify(updated),id);
       this.enqueue(updated,status);
@@ -212,7 +225,7 @@ export class Inventory {
   notificationText(data) {
     const name=data.status==='cancelled'?'Заказ отменён':data.status==='confirmed'?'Заказ подтверждён':data.editedAt?'Заказ изменён':'Новый заказ';
     const who=`${data.user.name}${data.user.username?' @'+data.user.username:''} (ID ${data.user.id})`;
-    return `${name} №${data.id}\nКлиент: ${who}\nБренд: ${data.shipmentTitle}${data.editedAt?'\nИзменён: '+data.editedAt.replace('T',' ').slice(0,19)+' UTC':''}\n\n${data.lines.map(l=>`${l.sku} · ${l.name}\n${l.quantity} шт. × ${(l.price/100).toFixed(2)} ₽`).join('\n\n')}\n\nИтого: ${(data.total/100).toFixed(2)} ₽${data.comment?'\nКомментарий: '+data.comment:''}`;
+    return `${name} №${data.id}\nКлиент: ${who}\nБренд: ${data.shipmentTitle}${data.editedAt?'\nИзменён: '+data.editedAt.replace('T',' ').slice(0,19)+' UTC':''}\n\n${data.lines.map(l=>`${l.shipmentTitle?l.shipmentTitle+' · ':''}${l.sku} · ${l.name}\n${l.quantity} шт. × ${(l.price/100).toFixed(2)} ₽`).join('\n\n')}\n\nИтого: ${(data.total/100).toFixed(2)} ₽${data.comment?'\nКомментарий: '+data.comment:''}`;
   }
   enqueue(data,event) {
     const text=this.notificationText(data);

@@ -197,3 +197,68 @@ test('removed catalogs cannot be imported or ordered while existing orders remai
   assert.equal(inv.orders(user,true)[0].status,'cancelled');
   assert.equal(inv.one('SELECT placed FROM products WHERE shipment=? AND id=?','retired','p1').placed,0);
 });
+
+function mixedFixture(){
+  const f=fixture();
+  f.inv.importShipment({id:'remax',title:'Remax',status:'arrived',stockMode:'live',groupingMode:'manual',groups:['GL-27'],products:[{id:'p1',sku:'RM-1',name:'Стекло iPhone 15',group:'GL-27',stock:5,price:20000}]});
+  return f;
+}
+const mixedRequest=key=>({requestKey:key,lines:[{shipmentId:'apple',id:'p1',quantity:2,expectedPrice:16000},{shipmentId:'remax',id:'p1',quantity:3,expectedPrice:20000}]});
+const stock=(inv,brand,id)=>inv.catalog(true).find(s=>s.id===brand).products.find(p=>p.id===id).stock;
+
+test('one mixed order deducts both brands, retries safely, edits and cancels independently with identical IDs',()=>{
+  const {inv}=mixedFixture(),input=mixedRequest('mixed');
+  const order=inv.placeOrder(user,input);
+  assert.equal(order.shipmentId,'mixed');assert.equal(order.shipmentTitle,'Apple + Remax');assert.equal(order.total,92000);
+  assert.equal(stock(inv,'apple','p1'),8);assert.equal(stock(inv,'remax','p1'),2);
+  assert.equal(inv.placeOrder(user,input).id,order.id);assert.equal(inv.orders(user).length,1);
+  const edit=editInput(order,[{shipmentId:'apple',id:'p1',quantity:1},{shipmentId:'remax',id:'p1',quantity:4}]);
+  const edited=inv.editOrder(user,order.id,edit);
+  assert.equal(stock(inv,'apple','p1'),9);assert.equal(stock(inv,'remax','p1'),1);
+  assert.equal(inv.editOrder(user,order.id,edit).revision,edited.revision);
+  inv.changeOrder(user,order.id,'cancelled');assert.equal(stock(inv,'apple','p1'),10);assert.equal(stock(inv,'remax','p1'),5);
+  assert.equal(inv.orders(user).length,0);
+});
+
+test('mixed checkout rolls back all stock and notification writes on stale price, stock, or closed brand',()=>{
+  for(const kind of ['stock','price','closed']){
+    const {inv}=mixedFixture(),input=mixedRequest('failed');
+    if(kind==='stock')input.lines[1].quantity=6;
+    if(kind==='price')input.lines[1].expectedPrice=1;
+    if(kind==='closed'){
+      const catalog=inv.catalog(true).find(s=>s.id==='remax');inv.importShipment({...catalog,status:'closed'});
+    }
+    assert.throws(()=>inv.placeOrder(user,input),error=>error.status===409);
+    assert.equal(stock(inv,'apple','p1'),10);assert.equal(stock(inv,'remax','p1'),5);
+    assert.equal(inv.orders(user).length,0);assert.equal(inv.rows('SELECT * FROM outbox').length,0);
+  }
+});
+
+test('mixed edits reject stale revisions and unavailable new stock without partial changes, preserve prices, allow removal of a brand',()=>{
+  const {inv}=mixedFixture(),order=inv.placeOrder(user,mixedRequest('edit-mixed'));
+  const apple=inv.catalog(true).find(s=>s.id==='apple');inv.importShipment({...apple,products:apple.products.map(p=>({...p,price:99999}))});
+  const originalStock=stock(inv,'apple','p1');
+  assert.throws(()=>inv.editOrder(user,order.id,editInput(order,[{shipmentId:'apple',id:'p1',quantity:1},{shipmentId:'remax',id:'p1',quantity:6}])),error=>error.status===409);
+  assert.equal(stock(inv,'apple','p1'),originalStock);
+  const edited=inv.editOrder(user,order.id,editInput(order,[{shipmentId:'apple',id:'p1',quantity:1}]));
+  assert.equal(edited.shipmentId,'apple');assert.equal(edited.total,16000);assert.equal(stock(inv,'remax','p1'),5);
+  assert.throws(()=>inv.editOrder(user,order.id,editInput(order,[{shipmentId:'apple',id:'p1',quantity:2}])),/уже изменён/);
+});
+
+test('mixed explicit and legacy lines deduct the correct catalog and duplicate composite IDs are rejected',()=>{
+  const {inv}=mixedFixture(),input={...mixedRequest('hybrid'),shipmentId:'apple'};delete input.lines[0].shipmentId;
+  inv.placeOrder(user,input);assert.equal(stock(inv,'apple','p1'),8);assert.equal(stock(inv,'remax','p1'),2);
+  const duplicate=mixedRequest('duplicate');duplicate.lines.push(duplicate.lines[0]);
+  assert.throws(()=>inv.placeOrder(user,duplicate),/повтор/);
+});
+
+test('newness survives reimport and reappearance; newly added SKUs get their first-seen date',()=>{
+  const {inv,catalog,sql}=fixture();
+  const old=JSON.parse(inv.one('SELECT data FROM products WHERE shipment=? AND id=?','apple','p1').data);
+  sql.exec('UPDATE products SET data=? WHERE shipment=? AND id=?',JSON.stringify({...old,addedAt:'2020-01-01T00:00:00Z'}),'apple','p1');
+  inv.importShipment({...catalog,products:[catalog.products[1]]});
+  inv.importShipment({...catalog,products:[...catalog.products,{id:'new',name:'Новинка',group:'Копия',stock:1,price:1}]});
+  const products=inv.catalog()[0].products;
+  assert.equal(products.find(p=>p.id==='p1').addedAt,'2020-01-01T00:00:00Z');
+  assert(Date.parse(products.find(p=>p.id==='new').addedAt)>Date.parse('2020-01-01'));
+});

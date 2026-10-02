@@ -51,7 +51,7 @@ await new Promise(resolve=>server.listen(4174,'127.0.0.1',resolve));
 await mkdir('test-results',{recursive:true});
 let browser;
 try{
-  browser=await chromium.launch({headless:true,args:['--no-sandbox']});
+  browser=await chromium.launch({headless:true,...(process.env.TEST_BROWSER_PATH?{executablePath:process.env.TEST_BROWSER_PATH}:{}),args:['--no-sandbox']});
   const page=await browser.newPage({viewport:{width:390,height:844}}),errors=[];
   page.on('pageerror',error=>errors.push(error.message));
   await page.route('https://telegram.org/js/telegram-web-app.js',route=>route.fulfill({contentType:'text/javascript',body:`window.Telegram={WebApp:{initData:${JSON.stringify(initData)},ready(){},expand(){},isVersionAtLeast(){return false},BackButton:{show(){},hide(){},onClick(){}}}};`}));
@@ -99,7 +99,7 @@ try{
 
   // Checkout has no manager selector.
   await page.locator('[data-step="1"][data-id="MM0A3"]').click();
-  await page.locator('#open-cart').click();
+  await page.locator('#open-cart').click();await page.waitForSelector('#dialog[open] #submit-placeOrder');
   assert.equal(await page.locator('#placeOrder-manager').count(),0);
   assert.equal(await page.locator('#submit-placeOrder').isDisabled(),false);
   await page.locator('#submit-placeOrder').click();
@@ -156,8 +156,87 @@ try{
   assert.equal(desktopBoxes[0],desktopBoxes[1]);
   await page.screenshot({path:'test-results/store-desktop-home.png',fullPage:true});
 
+  // All five customer improvements, with two brands deliberately sharing a product ID.
+  const remaxProducts=[
+    {id:'MM0A3',sku:'RM-SAME',name:'Стекло iPhone 15',group:'GL-27',stock:5,price:30000,image:'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aGioAAAAASUVORK5CYII='},
+    {id:'PRO',sku:'RM-PRO',name:'Стекло iPhone 15 Pro',group:'GL-27',stock:4,price:40000},
+    {id:'MAX',sku:'RM-MAX',name:'Стекло iPhone 15 Pro Max',group:'GL-27',stock:3,price:50000}
+  ];
+  const remaxCatalog={id:'remax',title:'Remax',status:'arrived',stockMode:'live',groupingMode:'manual',groups:['GL-27'],products:remaxProducts};
+  store.inventory.importShipment(remaxCatalog);
+  await page.setViewportSize({width:390,height:844});
+  await page.locator('#refresh').click();
+  await page.locator('[data-brand="apple"]').click();await page.locator('[data-category="Оригинал"]').click();
+  await page.locator('[data-step="1"][data-id="MM0A3"]').click();
+  await page.locator('[data-step="1"][data-id="MM0A3"]').click();
+  await page.locator('#back').click();await page.locator('#back').click();
+  assert.match(await page.locator('#open-cart').textContent(),/2 шт/);
+  await page.locator('[data-brand="remax"]').click();await page.locator('[data-category="GL-27"]').click();
+  await page.locator('#product-sort').selectOption('price-desc');
+  assert.deepEqual(await page.locator('[data-product]').evaluateAll(els=>els.map(el=>el.dataset.product)),['MAX','PRO','MM0A3']);
+  await page.locator('#product-sort').selectOption('price-asc');
+  assert.equal(await page.locator('[data-product]').first().getAttribute('data-product'),'MM0A3');
+  await page.locator('#product-sort').selectOption('name');
+  await page.locator('#phone-model').selectOption('iPhone 15');
+  assert.equal(await page.locator('[data-product]').count(),1);
+  await page.locator('[data-enlarge="MM0A3"]').click();await page.waitForSelector('#photo-dialog[open]');
+  await page.waitForFunction(()=>document.querySelector('#photo-dialog>img')?.naturalWidth===1);
+  await page.keyboard.press('Escape');await page.waitForSelector('#photo-dialog',{state:'hidden'});
+  await page.locator('[data-step="1"][data-id="MM0A3"]').click();
+  await page.screenshot({path:'test-results/store-new-filters.png',fullPage:true});
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+  await page.locator('#open-cart').click();await page.waitForSelector('#dialog[open] #submit-placeOrder');
+  assert.equal(await page.locator('[data-cart-qty]').count(),2);
+  await page.locator('[data-cart-qty="remax:MM0A3"]').fill('2');await page.locator('[data-cart-qty="remax:MM0A3"]').press('Tab');
+  await page.locator('#comment').fill('Сохранённая корзина');
+  await page.reload();await page.waitForSelector('#open-cart');
+  assert.match(await page.locator('#open-cart').textContent(),/4 шт/);
+  const currentApple=store.inventory.catalog(true).find(s=>s.id==='apple');
+  store.inventory.importShipment({...currentApple,products:currentApple.products.filter(p=>!p.hidden).map(p=>p.id==='MM0A3'?{...p,stock:1,price:99000}:p)});
+  await page.locator('#open-cart').click();await page.waitForSelector('#dialog[open] #submit-placeOrder');
+  assert.equal(await page.locator('#comment').inputValue(),'Сохранённая корзина');
+  assert.equal(await page.locator('[data-cart-qty="apple:MM0A3"]').inputValue(),'1');
+  assert.match(await page.locator('#dialog .warning').textContent(),/цена изменилась/);
+  await page.screenshot({path:'test-results/store-shared-cart.png',fullPage:true});
+
+  // Simulate a response lost AFTER the server committed the order, then reload the app.
+  const orderCount=store.inventory.orders({id:'123'}).length;
+  let lost=false;
+  await page.route('**/api/orders',async route=>{
+    if(route.request().method()==='POST'&&!lost){lost=true;await route.fetch();await route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:'Тест: ответ потерян'})});}
+    else await route.continue();
+  });
+  await page.locator('#submit-placeOrder').click();await page.waitForFunction(()=>document.querySelector('#submit-placeOrder')?.textContent==='Проверить отправку');
+  assert.equal(store.inventory.orders({id:'123'}).length,orderCount+1);
+  await page.reload();await page.waitForSelector('#open-cart');await page.locator('#open-cart').click();await page.waitForSelector('#dialog[open] #submit-placeOrder');
+  assert.equal(await page.locator('#comment').isDisabled(),true);
+  await page.locator('#submit-placeOrder').click();await page.waitForSelector('.order');
+  assert.equal(store.inventory.orders({id:'123'}).length,orderCount+1);
+  const mixed=store.inventory.orders({id:'123'})[0];
+  assert.equal(mixed.shipmentId,'mixed');assert.equal(mixed.lines.length,2);assert.equal(mixed.total,159000);
+  assert.equal(await page.locator('#cart-bar').isVisible(),false);
+  await page.locator(`[data-edit-order="${mixed.id}"]`).click();
+  await page.locator('[data-edit-qty="remax:MM0A3"]').fill('1');await page.locator('#save-order').click();
+  await page.waitForSelector('#edit-order-form',{state:'hidden'});
+  assert.equal(store.inventory.orders({id:'123'})[0].lines.find(l=>l.shipmentId==='remax').quantity,1);
+
+  // Repeat uses current prices and stock, explains removals and never submits automatically.
+  store.inventory.importShipment({...remaxCatalog,products:remaxProducts.map(p=>p.id==='MM0A3'?{...p,stock:1,price:35000}:p)});
+  await page.locator(`[data-repeat-order="${mixed.id}"]`).click();
+  await page.waitForSelector('[data-cart-qty="remax:MM0A3"]');
+  assert.equal(await page.locator('[data-cart-qty]').count(),1);
+  assert.match(await page.locator('#dialog .warning').textContent(),/недоступен/);
+  assert.match(await page.locator('#dialog .warning').textContent(),/цена изменилась/);
+  assert.equal(store.inventory.orders({id:'123'}).length,orderCount+1);
+  await page.locator('[data-cart-remove="remax:MM0A3"]').click();
+  assert.equal(await page.locator('#submit-placeOrder').isDisabled(),true);
+  await page.locator('#close-dialog').click();
+  await page.locator(`[data-cancel="${mixed.id}"]`).click();await page.locator('#confirm-action').click();
+  await page.waitForSelector(`[data-cancel="${mixed.id}"]`,{state:'hidden'});
+  assert.equal(store.inventory.orders({id:'123'}).some(o=>o.id===mixed.id),false);
+
   assert.deepEqual(errors,[]);
-  console.log('Browser checks passed: two-brand layout, global search, font and colors, categories, checkout and Excel category assignment.');
+  console.log('Browser checks passed: shared persistent cart, cross-brand order/edit/cancel, lost-response recovery, price/stock reconciliation, photo viewer, repeat order, sorting/model filters, responsive layout and Excel import.');
 }finally{
   await browser?.close();
   await new Promise(resolve=>server.close(resolve));

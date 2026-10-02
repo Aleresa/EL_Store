@@ -108,7 +108,7 @@ async function readXlsx(file,signal) {
 export async function exportOrders(orders) {
   const esc=s=>String(s??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');
   const rows=[['Заказ','Дата','Статус','Клиент','Telegram','Telegram ID','Бренд','Артикул','Наименование','Количество','Цена, ₽','Сумма, ₽','Комментарий']];
-  for(const r of orders)for(const l of r.lines)rows.push([r.id,r.createdAt,r.status,r.user.name,r.user.username,r.user.id,r.shipmentTitle,l.sku,l.name,l.quantity,l.price/100,l.quantity*l.price/100,r.comment]);
+  for(const r of orders)for(const l of r.lines)rows.push([r.id,r.createdAt,r.status,r.user.name,r.user.username,r.user.id,l.shipmentTitle||r.shipmentTitle,l.sku,l.name,l.quantity,l.price/100,l.quantity*l.price/100,r.comment]);
   const cells=rows.map((r,i)=>`<row r="${i+1}">${r.map((v,j)=>`<c r="${String.fromCharCode(65+j)}${i+1}" ${typeof v==='number'?'t="n"':'t="inlineStr"'}>${typeof v==='number'?`<v>${v}</v>`:`<is><t xml:space="preserve">${esc(v)}</t></is>`}</c>`).join('')}</row>`).join('');
   const zip=new window.JSZip();
   zip.file('[Content_Types].xml','<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>');
