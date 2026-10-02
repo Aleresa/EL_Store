@@ -112,7 +112,8 @@ export class Inventory {
       const stock=p.stock ?? p.total;
       if (!validId(p.id) || ids.has(p.id) || !trim(p.name,500) || !Number.isSafeInteger(stock) || stock<0 || stock>10000000 || !Number.isSafeInteger(p.price) || p.price<0 || p.price>100000000) throw new ApiError(400,'В товарах есть некорректный артикул, количество, цена или дубликат.');
       ids.add(p.id);
-      if (p.image && (!/^data:image\/(webp|png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(p.image) || p.image.length>180000)) throw new ApiError(400,'Некорректное изображение.');
+      if (p.image && (typeof p.image!=='string'||!/^data:image\/(webp|png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(p.image))) throw new ApiError(400,`${p.sku||p.id}: неверный формат фотографии. Загрузите Excel заново.`);
+      if (p.image?.length>180000) throw new ApiError(400,`${p.sku||p.id}: фотография слишком большая. Обновите приложение и загрузите Excel заново для сжатия.`);
       if (p.imageKey && !/^[a-zA-Z0-9_-]+\/[a-zA-Z0-9_-]+$/.test(p.imageKey)) throw new ApiError(400,'Некорректное изображение.');
       if(input.groupingMode==='manual'&&p.group!==undefined&&(typeof p.group!=='string'||p.group.length>80))throw new ApiError(400,'Некорректная группа товара.');
       const group=input.groupingMode==='manual'?trim(p.group,80):'';

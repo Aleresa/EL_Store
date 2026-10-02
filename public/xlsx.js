@@ -19,14 +19,22 @@ async function relations(zip,path) {
   if(!entry)return {};
   return Object.fromEntries(nodes(xml(await entry.async('text')),'Relationship').filter(r=>r.getAttribute('TargetMode')!=='External').map(r=>[r.getAttribute('Id'),resolve(path,r.getAttribute('Target'))]));
 }
-async function compress(bytes) {
+export async function compressProductImage(bytes) {
   const blob=new Blob([bytes]),url=URL.createObjectURL(blob);
   try {
     const image=new Image();image.src=url;await image.decode();
     const ratio=Math.min(1,320/image.width,320/image.height);
     const canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(image.width*ratio));canvas.height=Math.max(1,Math.round(image.height*ratio));
     const ctx=canvas.getContext('2d');ctx.fillStyle='white';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.drawImage(image,0,0,canvas.width,canvas.height);
-    return canvas.toDataURL('image/webp',.7);
+    const webp=canvas.toDataURL('image/webp',.7);
+    if(webp.startsWith('data:image/webp;base64,')&&webp.length<=180000)return webp;
+    // Some Telegram webviews return PNG when WebP encoding is unavailable.
+    // Check the actual result and use broadly supported JPEG within the API limit.
+    for(const quality of [.8,.65,.45,.25]){
+      const jpeg=canvas.toDataURL('image/jpeg',quality);
+      if(jpeg.startsWith('data:image/jpeg;base64,')&&jpeg.length<=180000)return jpeg;
+    }
+    throw Error('Не удалось сжать фотографию до допустимого размера.');
   } finally {URL.revokeObjectURL(url);}
 }
 export async function readSupplierExcel(file,{signal}={}) {
@@ -40,7 +48,7 @@ export async function readSupplierExcel(file,{signal}={}) {
   for(const picture of result.pictures) {
     signal?.throwIfAborted();
     const product=result.products.find(p=>p.id===picture.id);
-    try{product.image=await compress(picture.bytes);}catch{result.warnings.push(`${product.sku}: не удалось прочитать фотографию.`);}
+    try{product.image=await compressProductImage(picture.bytes);}catch{result.warnings.push(`${product.sku}: не удалось прочитать или сжать фотографию.`);}
   }
   signal?.throwIfAborted();
   for(const product of result.products)if(!product.image)result.warnings.push(`${product.sku}: фотография отсутствует или её формат не поддерживается.`);
@@ -95,7 +103,7 @@ async function readXlsx(file,signal) {
       const row=Number(textOf(from,'row'))+1,p=rowProducts.get(row);if(!p)continue;
       const blip=nodes(anchor,'blip')[0],imagePath=blip && dr[blip.getAttribute('r:embed')];
       if(imagePath && zip.file(imagePath)) {
-        try { p.image=await compress(await zip.file(imagePath).async('uint8array')); }
+        try { p.image=await compressProductImage(await zip.file(imagePath).async('uint8array')); }
         catch { warnings.push(`${p.sku}: не удалось прочитать фотографию.`); }
       }
     }

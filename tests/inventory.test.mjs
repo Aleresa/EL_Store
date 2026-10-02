@@ -124,7 +124,8 @@ test('catalog validates groups and product data',()=>{
   assert.throws(()=>inv.importShipment({...catalog,groups:['Оригинал','оригинал']}),/уникальными/);
   assert.throws(()=>inv.importShipment({...catalog,products:[{...catalog.products[0],group:'Нет такой'}]}),/категорию/);
   assert.throws(()=>inv.importShipment({...catalog,products:[{...catalog.products[0],stock:-1}]}),/количество/);
-  assert.throws(()=>inv.importShipment({...catalog,products:[{...catalog.products[0],image:'javascript:alert(1)'}]}),/изображение/);
+  assert.throws(()=>inv.importShipment({...catalog,products:[{...catalog.products[0],image:'javascript:alert(1)'}]}),/неверный формат фотографии/);
+  assert.throws(()=>inv.importShipment({...catalog,products:[{...catalog.products[0],image:'data:image/png;base64,'+'A'.repeat(180000)}]}),/фотография слишком большая/);
 });
 
 function signedData(token,overrides={}){

@@ -297,10 +297,26 @@ try{
   assert.deepEqual(await page.locator('[data-category] strong').allTextContents(),['Кабели','Зарядки','Аккумуляторы']);
   await page.setViewportSize({width:320,height:740});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
 
+  // Webviews without WebP encoders silently return PNG, which can exceed the API limit.
+  const fallbackImage=await page.evaluate(async()=>{
+    const {compressProductImage}=await import('/xlsx.js');
+    const canvas=document.createElement('canvas');canvas.width=320;canvas.height=320;
+    const ctx=canvas.getContext('2d'),pixels=ctx.createImageData(320,320);let seed=123;
+    for(let i=0;i<pixels.data.length;i+=4){for(let c=0;c<3;c++){seed=(Math.imul(seed,1664525)+1013904223)>>>0;pixels.data[i+c]=seed>>>24;}pixels.data[i+3]=255;}
+    ctx.putImageData(pixels,0,0);
+    const original=HTMLCanvasElement.prototype.toDataURL,source=canvas.toDataURL('image/png');
+    const bytes=await (await fetch(source)).arrayBuffer();
+    HTMLCanvasElement.prototype.toDataURL=function(type,quality){return original.call(this,type==='image/webp'?'image/png':type,quality);};
+    try{return {sourceLength:source.length,image:await compressProductImage(bytes)};}
+    finally{HTMLCanvasElement.prototype.toDataURL=original;}
+  });
+  assert.ok(fallbackImage.sourceLength>180000);
+  assert.match(fallbackImage.image,/^data:image\/jpeg;base64,/);assert.ok(fallbackImage.image.length<=180000);
+  store.inventory.importShipment({id:customBrand.id,title:'Baseus Pro',status:'arrived',stockMode:'live',groupingMode:'manual',products:[{id:'image-check',name:'Photo',price:100,stock:1,group:'Кабели',image:fallbackImage.image}]});
+
   assert.deepEqual(errors,[]);
   console.log('Browser checks passed: shared persistent cart, cross-brand order/edit/cancel, lost-response recovery, price/stock reconciliation, photo viewer, repeat order, sorting/model filters, responsive layout and Excel import.');
 }finally{
   await browser?.close();
   await new Promise(resolve=>server.close(resolve));
 }
-
