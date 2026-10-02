@@ -92,3 +92,14 @@
 @media(max-width:480px){.brand-actions{flex-direction:column;flex-shrink:0}.brand-actions button{font-size:12px;padding:11px 10px}.admin-panel{padding:16px}.admin-row{align-items:flex-start}}
 .category-card strong{overflow-wrap:anywhere}
 @media(max-width:380px){.category-grid.count-3{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+/* Remax glass categories: a taller panel with a fixed coloured reflection. */
+[data-category-brand="remax"] .category-card{--glass-glint:#5C768D;min-height:174px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;overflow:hidden;isolation:isolate;border:1px solid #ffffff;border-radius:20px;background:linear-gradient(145deg,#ffffffed 0%,#ffffffe0 42%,#ffffff70 100%);box-shadow:inset 0 0 0 1px #2D293310,inset 0 2px 2px #fff,0 10px 24px #3427470d}
+[data-category-brand="remax"] [data-category="GL-27 Privacy"]{--glass-glint:#B3F0C7}
+[data-category-brand="remax"] [data-category="ES-01"]{--glass-glint:#F0C7B3}
+[data-category-brand="remax"] .category-card::before{content:"";position:absolute;inset:0;z-index:-2;background:radial-gradient(ellipse at 100% 100%,var(--glass-glint) 0%,transparent 70%),linear-gradient(135deg,transparent 20%,var(--glass-glint) 150%);opacity:.8;pointer-events:none}
+[data-category-brand="remax"] .category-card::after{content:"";position:absolute;inset:0;z-index:-1;background:linear-gradient(125deg,transparent 12%,#ffffff45 24%,#fffffff0 26%,#ffffff75 28%,transparent 42%,transparent 71%,#ffffffb3 72%,transparent 74%);box-shadow:inset 1px 1px 0 #fff,inset -1px -1px 0 #ffffffb3;border-radius:inherit;pointer-events:none}
+[data-category-brand="remax"] .category-card strong{max-width:100%;text-wrap:balance}
+[data-category-brand="remax"] .category-card span{color:#2D2933}
+[data-category-brand="remax"] .category-card:focus-visible{outline:3px solid #5C768D;outline-offset:3px}
+@media(max-width:640px){[data-category-brand="remax"] .category-card{min-height:148px;padding:12px 8px;border-radius:17px}}
