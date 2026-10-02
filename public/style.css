@@ -103,3 +103,5 @@
 [data-category-brand="remax"] .category-card span{color:#2D2933}
 [data-category-brand="remax"] .category-card:focus-visible{outline:3px solid #5C768D;outline-offset:3px}
 @media(max-width:640px){[data-category-brand="remax"] .category-card{min-height:148px;padding:12px 8px;border-radius:17px}}
+
+.topbar-actions{display:flex;align-items:center;gap:8px;flex-shrink:0}.contact-button{display:inline-flex;align-items:center;justify-content:center;min-height:36px;padding:8px 12px;border:1px solid var(--line);border-radius:12px;background:var(--accent);color:var(--primary-ink);font-size:12px;font-weight:600;text-decoration:none;white-space:nowrap}.contact-button:hover{background:var(--primary)}
