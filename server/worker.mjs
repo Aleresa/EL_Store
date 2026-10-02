@@ -182,7 +182,7 @@ export class NewsletterStore {
       if(command==='/id') text=`Ваш Telegram ID: ${message.from.id}`;
       if(command==='/start') text='Откройте товары, выберите бренд и оформите заказ. Остатки обновляются после каждого заказа и загрузки Excel.';
       const admin=isAdmin({id:message.from.id},this.env);
-      if(command==='/admin' && admin) text='Откройте приложение → Управление. Здесь можно обновить каталоги Apple, Remax и Gurdini из Excel и обработать заказы.';
+      if(command==='/admin' && admin) text='Откройте приложение → Управление. Здесь можно обновить каталоги Apple и Remax из Excel и обработать заказы.';
       if(message.forward_origin?.type==='channel' && admin) text=`ID канала: ${message.forward_origin.chat.id}\nДобавьте бота администратором с правом публикации, затем укажите этот ID в ORDER_CHAT_ID.`;
       if(message.document && admin) text='Для обновления каталога откройте приложение → Управление → нужный бренд → Загрузить/Обновить Excel.';
       if(text) await telegram(this.env,'sendMessage',{chat_id:message.chat.id,text,reply_markup:{inline_keyboard:[[{text:'Открыть товары',url:this.env.MINI_APP_URL || 'https://el-store.elereas.workers.dev'}]]}});

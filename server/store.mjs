@@ -1,9 +1,9 @@
 import {ApiError} from './auth.mjs';
 import {groupKey} from '../public/product-groups.js';
+import {brandById} from '../public/catalog-config.js';
 
 const ACTIVE = new Set(['arrived']);
 const STATUSES = new Set(['draft','arrived','closed']);
-const FIXED_CATEGORIES={apple:['Оригинал','Копия'],remax:['GL-27','GL-27 Privacy','ES-01'],gurdini:['Стекла','Чехлы','Аккумуляторы']};
 const validId = x => typeof x === 'string' && /^[a-zA-Z0-9_-]{1,80}$/.test(x);
 const trim = (s,n) => typeof s === 'string' ? s.trim().slice(0,n) : '';
 
@@ -31,7 +31,7 @@ export class Inventory {
   rows(query,...bindings) { return [...this.sql.exec(query,...bindings)]; }
   one(query,...bindings) { return this.rows(query,...bindings)[0]; }
   catalog(admin=false) {
-    return this.rows('SELECT data FROM shipments').map(r=>JSON.parse(r.data)).filter(s=>admin || s.status !== 'draft').map(s=>{
+    return this.rows('SELECT data FROM shipments').map(r=>JSON.parse(r.data)).filter(s=>brandById(s.id) && (admin || s.status !== 'draft')).map(s=>{
       const groups=s.groupingMode==='manual'?(s.groups||[]):[];
       const retail=s.stockMode==='live';
       const products=this.rows('SELECT * FROM products WHERE shipment=? ORDER BY rowid',s.id).map((row,index)=>{
@@ -54,6 +54,7 @@ export class Inventory {
     });
   }
   importShipment(input) {
+    if(!brandById(input.id))throw new ApiError(400,'Выберите Apple или Remax.');
     if (!validId(input.id) || !trim(input.title,160) || !STATUSES.has(input.status) || !Array.isArray(input.products) || !input.products.length || input.products.length>3000) throw new ApiError(400,'Проверьте название, статус и список товаров.');
     for (const d of [input.eta,input.publishedAt]) if (d != null && d !== '' && (!/^\d{4}-\d{2}-\d{2}$/.test(d) || !Number.isFinite(Date.parse(d)) || new Date(d).toISOString().slice(0,10)!==d)) throw new ApiError(400,'Некорректная дата.');
     const old = this.one('SELECT data FROM shipments WHERE id=?',input.id);
@@ -61,7 +62,7 @@ export class Inventory {
     if(input.groupingMode!==undefined&&input.groupingMode!=='manual')throw new ApiError(400,'Некорректный режим групп.');
     const groups=input.groupingMode==='manual'?(input.groups??[]):[];
     if(!Array.isArray(groups)||groups.length>100||groups.some(g=>typeof g!=='string'||!g.trim()||g.length>80)||new Set(groups.map(groupKey)).size!==groups.length)throw new ApiError(400,'Укажите до 100 групп с уникальными названиями до 80 символов.');
-    const fixedCategories=input.stockMode==='live'?FIXED_CATEGORIES[input.id]:null;
+    const fixedCategories=input.stockMode==='live'?brandById(input.id)?.categories:null;
     const groupNames=fixedCategories?[...fixedCategories]:groups.map(g=>g.trim().replace(/\s+/g,' '));
     const shipment = {id:input.id,title:trim(input.title,160),brand:trim(input.brand,80),description:trim(input.description,3000),status:input.status,stockMode:input.stockMode==='live'?'live':(previous?.stockMode||'legacy'),groupingMode:'manual',groups:groupNames,eta:input.eta || null,
       publishedAt:input.publishedAt || previous?.publishedAt || (input.status === 'draft'?null:new Date().toISOString().slice(0,10))};
@@ -127,7 +128,7 @@ export class Inventory {
       }
       const shipmentRow=this.one('SELECT data FROM shipments WHERE id=?',input.shipmentId);
       const shipment=shipmentRow && JSON.parse(shipmentRow.data);
-      if(!shipment || !ACTIVE.has(shipment.status)) throw new ApiError(409,'Заказы по этому каталогу закрыты.');
+      if(!shipment || !brandById(shipment.id) || !ACTIVE.has(shipment.status)) throw new ApiError(409,'Заказы по этому каталогу закрыты.');
       const detailed=lines.map(l=>{
         const row=this.one('SELECT * FROM products WHERE shipment=? AND id=?',input.shipmentId,l.id);
         if(!row) throw new ApiError(409,'Товар больше не доступен.');

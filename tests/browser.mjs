@@ -58,11 +58,35 @@ try{
 
   await page.goto('http://localhost:4174');
   await page.waitForSelector('.brand-card');
-  assert.equal(await page.locator('.brand-card').count(),3);
-  assert.deepEqual(await page.locator('.brand-name').allTextContents(),['Apple','Remax','Gurdini']);
+  assert.equal(await page.locator('.brand-card').count(),2);
+  assert.deepEqual(await page.locator('.brand-name').allTextContents(),['Apple','Remax']);
   assert.equal(await page.locator('[data-view="shipments"]').textContent(),'Товары');
   assert.equal(await page.locator('#admin-tab').textContent(),'Управление');
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+
+  await page.evaluate(()=>document.fonts.ready);
+  assert.equal(await page.evaluate(()=>document.fonts.check('16px Inter')),true);
+  assert.equal(await page.locator('.brand-visual').first().evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(199, 179, 240)');
+  assert.equal(await page.locator('body').evaluate(el=>getComputedStyle(el).color),'rgb(45, 41, 51)');
+  const brandBoxes=await page.locator('.brand-card').evaluateAll(elements=>elements.map(el=>({x:el.getBoundingClientRect().x,y:el.getBoundingClientRect().y})));
+  assert.equal(brandBoxes[0].y,brandBoxes[1].y);assert(brandBoxes[1].x>brandBoxes[0].x);
+  await page.screenshot({path:'test-results/store-mobile-home.png',fullPage:true});
+  await page.locator('#catalog-search').fill('remax privacy');
+  await page.waitForFunction(()=>document.querySelectorAll('[data-search-result]').length===1);
+  assert.match(await page.locator('#search-results').textContent(),/GL-27 Privacy/);
+  await page.locator('#refresh').click();
+  assert.equal(await page.locator('#catalog-search').inputValue(),'remax privacy');
+  await page.locator('[data-search-result]').click();
+  await page.waitForSelector('[data-product="GL27P-DEMO"]');
+  await page.locator('#back').click();await page.locator('#back').click();
+  assert.equal(await page.locator('#catalog-search').inputValue(),'remax privacy');
+  await page.locator('#catalog-search').fill('MM0A3');
+  await page.waitForFunction(()=>document.querySelector('#search-results')?.textContent.includes('Оригинальный кабель'));
+  assert.equal(await page.locator('[data-search-result]').count(),1);
+  await page.locator('#catalog-search').fill('нет-такого-товара');
+  await page.waitForFunction(()=>document.querySelector('#search-results')?.textContent.includes('Ничего не найдено'));
+  await page.locator('#catalog-search').fill('');
+  await page.waitForSelector('#search-results',{state:'hidden'});
 
   // Apple -> Оригинал / Копия -> products.
   await page.locator('[data-brand="apple"]').click();
@@ -88,7 +112,7 @@ try{
   await page.locator('#admin-tab').click();
   assert.equal(await page.locator('#managers').count(),0);
   const adminText=await page.locator('.admin-panel').textContent();
-  for(const name of ['Оригинал','Копия','GL-27','GL-27 Privacy','ES-01','Стекла','Чехлы','Аккумуляторы'])assert(adminText.includes(name));
+  for(const name of ['Оригинал','Копия','GL-27','GL-27 Privacy','ES-01'])assert(adminText.includes(name));
 
   // Update Apple from Excel. Existing SKU keeps category, new SKU requires a fixed category.
   await page.locator('[data-brand-import="apple"]').click();
@@ -119,22 +143,23 @@ try{
   await page.locator('[data-category="GL-27 Privacy"]').click();
   await page.waitForSelector('[data-product="GL27P-DEMO"]');
 
-  // Back to categories, then brands, then Gurdini.
+  // Return to the two-brand home on narrow and desktop screens.
+  await page.screenshot({path:'test-results/store-mobile-products.png',fullPage:true});
   await page.locator('#back').click();
   assert.deepEqual(await page.locator('[data-category] strong').allTextContents(),['GL-27','GL-27 Privacy','ES-01']);
   await page.locator('#back').click();
-  await page.locator('[data-brand="gurdini"]').click();
-  assert.deepEqual(await page.locator('[data-category] strong').allTextContents(),['Стекла','Чехлы','Аккумуляторы']);
-  await page.locator('[data-category="Чехлы"]').click();
-  await page.waitForSelector('[data-product="G-CASE"]');
-
+  await page.setViewportSize({width:320,height:740});
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
   await page.setViewportSize({width:1440,height:1000});
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
-  await page.screenshot({path:'test-results/store-categories.png',fullPage:true});
+  const desktopBoxes=await page.locator('.brand-card').evaluateAll(elements=>elements.map(el=>el.getBoundingClientRect().y));
+  assert.equal(desktopBoxes[0],desktopBoxes[1]);
+  await page.screenshot({path:'test-results/store-desktop-home.png',fullPage:true});
 
   assert.deepEqual(errors,[]);
-  console.log('Browser checks passed: brand categories, product drill-down, checkout without managers, Excel category assignment.');
+  console.log('Browser checks passed: two-brand layout, global search, font and colors, categories, checkout and Excel category assignment.');
 }finally{
   await browser?.close();
   await new Promise(resolve=>server.close(resolve));
 }
+

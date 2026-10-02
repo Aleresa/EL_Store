@@ -1,5 +1,6 @@
 import {readSupplierExcel,exportOrders} from './xlsx.js';
 import {manualProducts,groupKey} from './product-groups.js';
+import {BRANDS,brandById,searchCatalog} from './catalog-config.js';
 
 const $=s=>document.querySelector(s), app=$('#app'), dialog=$('#dialog');
 const tg=window.Telegram?.WebApp;
@@ -8,14 +9,8 @@ const moneyFormats=[0,2].map(maximumFractionDigits=>new Intl.NumberFormat('ru-RU
 const money=n=>moneyFormats[n%100?1:0].format(n/100);
 const date=s=>s?new Date(s.length===10?s+'T12:00:00':s).toLocaleDateString('ru-RU',{day:'numeric',month:'long'}):'Дата не указана';
 const statuses={draft:'Скрыт',arrived:'В продаже',closed:'Продажа закрыта',placed:'Оформлен',confirmed:'Подтверждён',cancelled:'Отменён'};
-const BRANDS=[
-  {id:'apple',name:'Apple',categories:['Оригинал','Копия']},
-  {id:'remax',name:'Remax',categories:['GL-27','GL-27 Privacy','ES-01']},
-  {id:'gurdini',name:'Gurdini',categories:['Стекла','Чехлы','Аккумуляторы']}
-];
-const brandById=id=>BRANDS.find(b=>b.id===id);
 const catalogForBrand=id=>{const b=brandById(id);return state.shipments.find(s=>s.id===id)||(b&&state.shipments.find(s=>String(s.brand||s.title).toLowerCase()===b.name.toLowerCase()));};
-const sellableProducts=catalog=>(catalog?.products||[]).filter(p=>!p.hidden&&p.stock>0);
+const sellableProducts=catalog=>(catalog?.status==='arrived'?catalog.products:[]).filter(p=>!p.hidden&&p.stock>0);
 const categoriesFor=id=>brandById(id)?.categories||[];
 const state={preview:false,admin:false,ready:false,view:'shipments',shipments:[],current:null,filter:'all',sort:'new',search:'',cart:{},images:{},orders:[],requestKey:null,productGroup:''};
 let toastTimer,refreshPromise,importController;
@@ -79,16 +74,25 @@ function render(){
   if(tg?.BackButton){if(state.view==='shipments'&&state.current){tg.BackButton.show();}else{tg.BackButton.hide();}}
 }
 function renderShipments(){
-  app.innerHTML=`<div class="page-heading"><div><p class="eyebrow">EL / STORE</p><h1>Товары</h1><p class="subtitle">Выберите бренд.</p></div><span class="count">3 бренда</span></div><div class="brand-grid" id="shipment-grid"></div>`;
+  app.innerHTML=`<div class="toolbar home-search"><input class="search" type="search" id="catalog-search" placeholder="Поиск товара или бренда" aria-label="Поиск товара или бренда" value="${esc(state.search)}"></div><div class="page-heading"><div><p class="eyebrow">EL / STORE</p><h1>Товары</h1><p class="subtitle">Apple и Remax — выберите свой бренд.</p></div><span class="count">${BRANDS.length} бренда</span></div><div class="brand-grid" id="shipment-grid"></div><section id="search-results" aria-label="Результаты поиска" hidden></section>`;
+  $('#catalog-search').oninput=debounce(event=>{if(event.target.isConnected){state.search=event.target.value;cards();}});
   cards();
 }
 function cards(){
+  const query=state.search.trim(),matches=searchCatalog(state.shipments,query);
   const list=BRANDS.map(brand=>({brand,catalog:catalogForBrand(brand.id)}));
   $('#shipment-grid').innerHTML=list.map(({brand,catalog})=>{
     const available=sellableProducts(catalog),examples=available.filter(p=>p.image||p.imageKey).slice(0,2);
-    return `<article class="brand-card"><button class="brand-open" data-brand="${esc(brand.id)}"><div class="brand-visual ${esc(brand.id)}">${examples.map(p=>photo(p,'cover-photo')).join('')}<span class="brand-name">${esc(brand.name)}</span></div><div class="brand-card-footer"><span>${available.length} товаров</span><span class="arrow" aria-hidden="true">→</span></div></button></article>`;
+    return `<article class="brand-card"><button class="brand-open" data-brand="${esc(brand.id)}"><div class="brand-visual">${examples.map(p=>photo(p,'cover-photo')).join('')}<span class="brand-name">${esc(brand.name)}</span></div><div class="brand-card-footer"><span>${available.length} товаров</span><span class="arrow" aria-hidden="true">→</span></div></button></article>`;
   }).join('');
-  document.querySelectorAll('[data-brand]').forEach(b=>b.onclick=()=>openShipment(b.dataset.brand));
+  document.querySelectorAll('[data-brand]').forEach(button=>button.onclick=()=>openShipment(button.dataset.brand));
+  const results=$('#search-results');results.hidden=!query;
+  results.innerHTML=query?`<div class="section-header"><h2>Найдено товаров: ${matches.length}</h2></div>${matches.length?`<div class="search-products">${matches.slice(0,100).map(({brand,product:p},index)=>`<button class="search-product" data-search-result="${index}">${photo(p)}<span><small>${esc(brand.name)} · ${esc(p.group)} · ${esc(p.sku)}</small><strong>${esc(p.name)}</strong><span class="price">${money(p.price)}</span></span><span class="arrow" aria-hidden="true">→</span></button>`).join('')}</div>${matches.length>100?'<p class="fine-print">Показаны первые 100 товаров. Уточните запрос.</p>':''}`:'<p class="empty">Ничего не найдено. Попробуйте другое название, модель или артикул.</p>'}`:'';
+  results.querySelectorAll('[data-search-result]').forEach(button=>button.onclick=()=>{
+    const {brand,product}=matches[Number(button.dataset.searchResult)];
+    openShipment(brand.id);state.productGroup=product.group;render();
+    $('#product-search').value=product.sku;products(product.sku);
+  });
   list.forEach(({catalog})=>catalog&&loadImages({...catalog,products:sellableProducts(catalog)}));
 }
 function openShipment(id){if(state.current!==id){state.cart={};state.requestKey=null;state.productGroup='';}state.current=id;state.view='shipments';render();window.scrollTo(0,0);}
@@ -304,7 +308,7 @@ async function refresh({background=false}={}){
       state.shipments=shipments;
       const changed=previous!==JSON.stringify(state.shipments);
       if(background && (!changed||dialog.open))return;
-      if(state.view==='shipments' && $('#shipment-grid')){cards();$('.count').textContent='3 бренда';cartBar();return;}
+      if(state.view==='shipments' && $('#shipment-grid')){cards();$('.count').textContent=BRANDS.length+' бренда';cartBar();return;}
       if(state.view==='shipments' && $('#product-search')){
         const input=$('#product-search'),query=input.value,focused=document.activeElement;
         if(!activeShipment()){state.current=null;state.cart={};state.requestKey=null;render();return;}

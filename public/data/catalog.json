@@ -84,54 +84,6 @@
           "image": null
         }
       ]
-    },
-    {
-      "id": "gurdini",
-      "title": "Gurdini",
-      "brand": "Gurdini",
-      "description": "",
-      "status": "arrived",
-      "stockMode": "live",
-      "publishedAt": null,
-      "eta": null,
-      "groupingMode": "manual",
-      "groups": [
-        "Стекла",
-        "Чехлы",
-        "Аккумуляторы"
-      ],
-      "products": [
-        {
-          "id": "G-GLASS",
-          "sku": "G-GLASS",
-          "name": "Защитное стекло Gurdini",
-          "group": "Стекла",
-          "stock": 6,
-          "price": 60000,
-          "unit": "шт",
-          "image": null
-        },
-        {
-          "id": "G-CASE",
-          "sku": "G-CASE",
-          "name": "Чехол Gurdini",
-          "group": "Чехлы",
-          "stock": 10,
-          "price": 120000,
-          "unit": "шт",
-          "image": null
-        },
-        {
-          "id": "G-BATT",
-          "sku": "G-BATT",
-          "name": "Аккумулятор Gurdini",
-          "group": "Аккумуляторы",
-          "stock": 5,
-          "price": 220000,
-          "unit": "шт",
-          "image": null
-        }
-      ]
     }
   ]
 }

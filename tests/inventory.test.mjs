@@ -180,3 +180,20 @@ test('order notification delivery sends no manager line',async t=>{
   assert.match(sent.body.text,/Новый заказ/);
   assert.doesNotMatch(sent.body.text,/Менеджер/);
 });
+
+
+test('removed catalogs cannot be imported or ordered while existing orders remain cancellable',()=>{
+  const {inv,catalog,sql}=fixture();
+  const order=inv.placeOrder(user,request('before-removal'));
+  sql.exec('UPDATE shipments SET id=?,data=? WHERE id=?','retired',JSON.stringify({...catalog,id:'retired'}),'apple');
+  sql.exec('UPDATE products SET shipment=? WHERE shipment=?','retired','apple');
+  sql.exec('UPDATE orders SET shipment=?,data=? WHERE id=?','retired',JSON.stringify({...order,shipmentId:'retired'}),order.id);
+  assert.deepEqual(inv.catalog(),[]);
+  assert.deepEqual(inv.catalog(true),[]);
+  assert.throws(()=>inv.importShipment({...catalog,id:'retired'}),/Apple или Remax/);
+  assert.throws(()=>inv.placeOrder(user,{...request('after-removal'),shipmentId:'retired'}),/закрыты/);
+  assert.equal(inv.orders(user)[0].id,order.id);
+  inv.changeOrder(user,order.id,'cancelled',false,1);
+  assert.equal(inv.orders(user,true)[0].status,'cancelled');
+  assert.equal(inv.one('SELECT placed FROM products WHERE shipment=? AND id=?','retired','p1').placed,0);
+});
