@@ -1,6 +1,6 @@
 import {readSupplierExcel,exportOrders} from './xlsx.js';
 import {manualProducts,groupKey} from './product-groups.js';
-import {BRANDS,brandById,searchCatalog} from './catalog-config.js';
+import {DEFAULT_BRANDS,searchCatalog} from './catalog-config.js';
 import {cartKey,cartEntry,readCart,reconcileCart,repeatCart} from './cart.js';
 import {phoneModels,sortProducts} from './catalog-tools.js';
 
@@ -11,10 +11,11 @@ const moneyFormats=[0,2].map(maximumFractionDigits=>new Intl.NumberFormat('ru-RU
 const money=n=>moneyFormats[n%100?1:0].format(n/100);
 const date=s=>s?new Date(s.length===10?s+'T12:00:00':s).toLocaleDateString('ru-RU',{day:'numeric',month:'long'}):'Дата не указана';
 const statuses={draft:'Скрыт',arrived:'В продаже',closed:'Продажа закрыта',placed:'Оформлен',confirmed:'Подтверждён',cancelled:'Отменён'};
-const catalogForBrand=id=>{const b=brandById(id);return state.shipments.find(s=>s.id===id)||(b&&state.shipments.find(s=>String(s.brand||s.title).toLowerCase()===b.name.toLowerCase()));};
-const sellableProducts=catalog=>(catalog?.status==='arrived'?catalog.products:[]).filter(p=>!p.hidden&&p.stock>0);
-const categoriesFor=id=>brandById(id)?.categories||[];
-const state={preview:false,admin:false,ready:false,view:'shipments',shipments:[],current:null,sort:'new',search:'',cart:{},images:{},orders:[],productGroup:'',phoneModel:'',comment:'',pendingOrder:null,cartChanges:[]};
+const brandById=id=>state.brands.find(b=>b.id===id);
+const visibleBrands=()=>state.brands.filter(b=>!b.hidden);
+const catalogForBrand=id=>state.shipments.find(s=>s.id===id);
+const sellableProducts=catalog=>(catalog?.status==='arrived'&&!catalog.hidden?catalog.products:[]).filter(p=>!p.hidden&&p.stock>0);
+const state={preview:false,admin:false,ready:false,view:'shipments',brands:[...DEFAULT_BRANDS],shipments:[],current:null,sort:'new',search:'',cart:{},images:{},orders:[],productGroup:'',phoneModel:'',comment:'',pendingOrder:null,cartChanges:[]};
 let toastTimer,refreshPromise,importController,placingOrder=false;
 const imageRequests=new Map();
 const debounce=(fn,delay=120)=>{let timer;return (...args)=>{clearTimeout(timer);timer=setTimeout(()=>fn(...args),delay);};};
@@ -25,6 +26,7 @@ async function api(path,method='GET',body){
   const response=await fetch('/api'+path,{method,headers:{'Content-Type':'application/json','X-Telegram-Init-Data':tg?.initData||''},...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(25000)});
   const data=await response.json();
   if(!response.ok){const error=Error(data.error||'Не удалось выполнить запрос.');error.status=response.status;throw error;}
+  if(path==='/catalog'&&Array.isArray(data.brands))state.brands=data.brands;
   return data;
 }
 async function init(){
@@ -114,7 +116,7 @@ function render(){
   if(tg?.BackButton){if(state.view==='shipments'&&state.current){tg.BackButton.show();}else{tg.BackButton.hide();}}
 }
 function renderShipments(){
-  app.innerHTML=`<div class="toolbar home-search"><input class="search" type="search" id="catalog-search" placeholder="Поиск товара или бренда" aria-label="Поиск товара или бренда" value="${esc(state.search)}"></div><div class="page-heading"><div><p class="eyebrow">EL / STORE</p><h1>Товары</h1><p class="subtitle">Apple и Remax — выберите свой бренд.</p></div><span class="count">${BRANDS.length} бренда</span></div><div class="brand-grid" id="shipment-grid"></div><section id="search-results" aria-label="Результаты поиска" hidden></section>`;
+  app.innerHTML=`<div class="toolbar home-search"><input class="search" type="search" id="catalog-search" placeholder="Поиск товара или бренда" aria-label="Поиск товара или бренда" value="${esc(state.search)}"></div><div class="page-heading"><div><p class="eyebrow">EL / STORE</p><h1>Товары</h1><p class="subtitle">Выберите бренд или найдите товар в поиске.</p></div><span class="count">Брендов: ${visibleBrands().length}</span></div><div class="brand-grid" id="shipment-grid"></div><section id="search-results" aria-label="Результаты поиска" hidden></section>`;
   $('#catalog-search').oninput=debounce(event=>{if(event.target.isConnected){state.search=event.target.value;cards();}});
   cards();
 }
@@ -122,10 +124,10 @@ function cards(){
   const query=state.search.trim(),found=searchCatalog(state.shipments,query);
   const controls=query?sortingControls(found.map(m=>m.product)):'';
   const matches=filteredProducts(found.map(m=>({...m.product,brand:m.brand}))).map(product=>({brand:product.brand,product}));
-  const list=BRANDS.map(brand=>({brand,catalog:catalogForBrand(brand.id)}));
+  const list=visibleBrands().map(brand=>({brand,catalog:catalogForBrand(brand.id)}));
   $('#shipment-grid').innerHTML=list.map(({brand,catalog})=>{
     const available=sellableProducts(catalog),examples=available.filter(p=>p.image||p.imageKey).slice(0,2);
-    return `<article class="brand-card"><button class="brand-open" data-brand="${esc(brand.id)}"><div class="brand-visual${examples.length?' has-photo':''}">${examples.map(p=>photo(p,'cover-photo')).join('')}<span class="brand-name">${esc(brand.name)}</span></div><div class="brand-card-footer"><span>${available.length} товаров</span></div></button></article>`;
+    return `<article class="brand-card"><button class="brand-open" data-brand="${esc(brand.id)}"><div class="brand-visual${brand.cover||examples.length?' has-photo':''}">${brand.cover?`<img class="brand-cover" src="${esc(brand.cover)}" alt="${esc(brand.name)}" loading="lazy">`:examples.map(p=>photo(p,'cover-photo')).join('')}<span class="brand-name">${esc(brand.name)}</span></div><div class="brand-card-footer"><span>${available.length} товаров</span></div></button></article>`;
   }).join('');
   document.querySelectorAll('[data-brand]').forEach(button=>button.onclick=()=>openShipment(button.dataset.brand));
   const results=$('#search-results');results.hidden=!query;
@@ -141,7 +143,7 @@ function cards(){
 function openShipment(id){if(state.current!==id){state.productGroup='';state.phoneModel='';}state.current=id;state.view='shipments';render();window.scrollTo(0,0);}
 function renderDetail(){
   const s=activeShipment();if(!s){state.current=null;render();return;}
-  const brand=brandById(s.id)||BRANDS.find(b=>b.name.toLowerCase()===String(s.brand||s.title).toLowerCase());
+  const brand=brandById(s.id);
   const categories=brand?.categories||[],visible=sellableProducts(s);
   if(!categories.some(name=>groupKey(name)===groupKey(state.productGroup)))state.productGroup='';
   if(!state.productGroup){
@@ -198,7 +200,7 @@ async function showCart(){
 }
 function drawCart(){
   const t=totals(),locked=Boolean(state.pendingOrder);
-  showDialog('Ваша корзина',`${state.cartChanges.length?`<div class="warning" role="status"><strong>Корзина обновлена. Проверьте изменения:</strong><ul>${[...new Set(state.cartChanges)].map(c=>`<li>${esc(c)}</li>`).join('')}</ul></div>`:''}${locked?'<p class="warning">Предыдущая отправка ещё не подтверждена. Нажмите «Проверить отправку»: повторный запрос не создаст второй заказ.</p>':''}${Object.values(state.cart).map(l=>`<div class="cart-line"><small>${esc(brandById(l.shipmentId)?.name)}</small><p>${esc(l.name)}</p><span class="muted">${esc(l.sku)} · ${money(l.price)} / шт.</span><div class="cart-quantity"><label>Количество<input data-cart-qty="${esc(cartKey(l.shipmentId,l.id))}" type="number" min="1" step="1" value="${l.quantity}" ${locked?'disabled':''}></label><button class="danger" data-cart-remove="${esc(cartKey(l.shipmentId,l.id))}" ${locked?'disabled':''}>Убрать</button></div></div>`).join('')||'<p class="empty">Корзина пуста. Выберите товары в каталоге.</p>'}<div class="cart-total"><span>${t.count} шт.</span><span>${money(t.total)}</span></div><label class="field">Комментарий<textarea id="comment" maxlength="1000" placeholder="Например, название магазина" ${locked?'disabled':''}>${esc(state.comment)}</textarea></label><p class="fine-print">Apple и Remax оформляются одним заказом. Перед отправкой проверяются актуальные цены и остатки.</p>${state.preview?'<p class="warning">Предпросмотр. Заказ не будет оформлен.</p>':''}<p id="placeOrder-error" class="error" role="alert"></p><button class="primary full" id="submit-placeOrder" ${state.preview||!state.ready||(!t.count&&!locked)?'disabled':''}>${locked?'Проверить отправку':'Оформить заказ'}</button>`);
+  showDialog('Ваша корзина',`${state.cartChanges.length?`<div class="warning" role="status"><strong>Корзина обновлена. Проверьте изменения:</strong><ul>${[...new Set(state.cartChanges)].map(c=>`<li>${esc(c)}</li>`).join('')}</ul></div>`:''}${locked?'<p class="warning">Предыдущая отправка ещё не подтверждена. Нажмите «Проверить отправку»: повторный запрос не создаст второй заказ.</p>':''}${Object.values(state.cart).map(l=>`<div class="cart-line"><small>${esc(brandById(l.shipmentId)?.name)}</small><p>${esc(l.name)}</p><span class="muted">${esc(l.sku)} · ${money(l.price)} / шт.</span><div class="cart-quantity"><label>Количество<input data-cart-qty="${esc(cartKey(l.shipmentId,l.id))}" type="number" min="1" step="1" value="${l.quantity}" ${locked?'disabled':''}></label><button class="danger" data-cart-remove="${esc(cartKey(l.shipmentId,l.id))}" ${locked?'disabled':''}>Убрать</button></div></div>`).join('')||'<p class="empty">Корзина пуста. Выберите товары в каталоге.</p>'}<div class="cart-total"><span>${t.count} шт.</span><span>${money(t.total)}</span></div><label class="field">Комментарий<textarea id="comment" maxlength="1000" placeholder="Например, название магазина" ${locked?'disabled':''}>${esc(state.comment)}</textarea></label><p class="fine-print">Товары разных брендов оформляются одним заказом. Перед отправкой проверяются актуальные цены и остатки.</p>${state.preview?'<p class="warning">Предпросмотр. Заказ не будет оформлен.</p>':''}<p id="placeOrder-error" class="error" role="alert"></p><button class="primary full" id="submit-placeOrder" ${state.preview||!state.ready||(!t.count&&!locked)?'disabled':''}>${locked?'Проверить отправку':'Оформить заказ'}</button>`);
   $('#comment').oninput=e=>{state.comment=e.target.value;saveCart();};
   dialog.querySelectorAll('[data-cart-remove]').forEach(b=>b.onclick=()=>{if(cartLocked())return;delete state.cart[b.dataset.cartRemove];saveCart();cartBar();drawCart();});
   dialog.querySelectorAll('[data-cart-qty]').forEach(el=>el.onchange=()=>{
@@ -300,11 +302,48 @@ function changeOrder(id,status,all){
 }
 function renderAdmin(){
   if(!state.admin){state.view='shipments';render();return;}
-  app.innerHTML=`<div class="page-heading"><div><p class="eyebrow">EL / STORE</p><h1>Управление</h1><p class="subtitle">Excel обновляет цены и текущие остатки по артикулу. Товары, которых нет в новом файле, скрываются автоматически.</p></div></div><div class="actions"><button class="secondary" id="all-orders">Все заказы</button><button class="secondary" id="setup-bot">Подключить бота</button><button class="secondary" id="notification-settings">Уведомления в канал</button></div><section class="admin-panel">${BRANDS.map(brand=>{const catalog=catalogForBrand(brand.id),available=sellableProducts(catalog);return `<div class="admin-row"><div><strong>${esc(brand.name)}</strong><small>${brand.categories.map(esc).join(' · ')}</small><small>${available.length} товаров в продаже${catalog?' · каталог загружен':' · Excel ещё не загружен'}</small></div><button class="primary" data-brand-import="${esc(brand.id)}">${catalog?'Обновить Excel':'Загрузить Excel'}</button></div>`;}).join('')}</section>`;
+  app.innerHTML=`<div class="page-heading"><div><p class="eyebrow">EL / STORE</p><h1>Управление</h1><p class="subtitle">Создавайте бренды и категории, загружайте товары из Excel.</p></div></div><div class="actions"><button class="primary" id="add-brand">+ Добавить бренд</button><button class="secondary" id="all-orders">Все заказы</button><button class="secondary" id="setup-bot">Подключить бота</button><button class="secondary" id="notification-settings">Уведомления в канал</button></div><section class="admin-panel">${state.brands.map(brand=>{const catalog=catalogForBrand(brand.id),count=catalog?.products.filter(p=>!p.hidden&&p.stock>0).length||0;return `<div class="admin-row"><div>${brand.cover?`<img class="admin-brand-cover" src="${esc(brand.cover)}" alt="">`:''}<strong>${esc(brand.name)}</strong><small>${brand.hidden?'Скрыт от покупателей':'Показывается покупателям'}</small><small>${brand.categories.map(esc).join(' · ')}</small><small>${count} товаров${catalog?'':' · Excel ещё не загружен'}</small></div><div class="brand-actions"><button class="primary" data-brand-import="${esc(brand.id)}">${catalog?'Обновить Excel':'Загрузить Excel'}</button><button class="secondary" data-brand-edit="${esc(brand.id)}">Настройки</button></div></div>`;}).join('')}</section>`;
+  $('#add-brand').onclick=()=>editBrand();
   $('#all-orders').onclick=()=>{state.view='all-orders';render();};
   $('#setup-bot').onclick=showBotSetup;
   $('#notification-settings').onclick=showNotifications;
-  document.querySelectorAll('[data-brand-import]').forEach(b=>{const brand=brandById(b.dataset.brandImport);b.onclick=()=>editShipment(catalogForBrand(brand.id),brand);});
+  document.querySelectorAll('[data-brand-import]').forEach(b=>b.onclick=()=>editShipment(catalogForBrand(b.dataset.brandImport),brandById(b.dataset.brandImport)));
+  document.querySelectorAll('[data-brand-edit]').forEach(b=>b.onclick=()=>editBrand(brandById(b.dataset.brandEdit)));
+}
+async function coverFromFile(file){
+  if(!/^image\/(png|jpeg|webp)$/.test(file.type)||file.size>15*1024*1024)throw Error('Выберите JPG, PNG или WebP размером до 15 МБ.');
+  const bitmap=await createImageBitmap(file);
+  try{
+    const scale=Math.min(1,720/Math.max(bitmap.width,bitmap.height)),canvas=document.createElement('canvas');
+    canvas.width=Math.max(1,Math.round(bitmap.width*scale));canvas.height=Math.max(1,Math.round(bitmap.height*scale));
+    canvas.getContext('2d').drawImage(bitmap,0,0,canvas.width,canvas.height);
+    let image=canvas.toDataURL('image/webp',.8);
+    if(image.length>350000)image=canvas.toDataURL('image/webp',.55);
+    if(image.length>350000)throw Error('Выберите изображение меньшего размера.');
+    return image;
+  }finally{bitmap.close();}
+}
+function editBrand(brand=null){
+  let cover=brand?.cover||null,processing=false;
+  showDialog(brand?'Настройки бренда':'Добавить бренд',`<form id="brand-form"><label class="field">Название<input id="brand-name" required maxlength="80" value="${esc(brand?.name||'')}" placeholder="Например, Baseus"></label><label class="field">Категории — по одной на строку<textarea id="brand-categories" required rows="5" placeholder="Кабели&#10;Зарядные устройства&#10;Аккумуляторы">${esc(brand?.categories.join('\n')||'')}</textarea></label><label class="field">Обложка<input type="file" id="brand-cover-file" accept="image/png,image/jpeg,image/webp"></label><div id="brand-cover-preview"></div><button type="button" class="secondary" id="remove-brand-cover">Убрать обложку</button>${brand?`<label class="field checkbox-field"><input type="checkbox" id="brand-visible" ${brand.hidden?'':'checked'}> Показывать бренд покупателям</label><p class="fine-print">Скрытый бренд недоступен для новых заказов. Товары и история заказов сохраняются.</p>`:'<p class="fine-print">После создания загрузите Excel и опубликуйте бренд.</p>'}<p class="error" id="brand-error" role="alert"></p><button class="primary full" id="save-brand" type="submit">${brand?'Сохранить':'Создать и загрузить товары'}</button></form>`);
+  const form=$('#brand-form');
+  const preview=()=>{$('#brand-cover-preview').innerHTML=cover?`<img class="brand-cover-preview" src="${esc(cover)}" alt="Обложка бренда">`:'';$('#remove-brand-cover').hidden=!cover;};preview();
+  $('#remove-brand-cover').onclick=()=>{cover=null;$('#brand-cover-file').value='';preview();};
+  $('#brand-cover-file').onchange=async e=>{
+    const file=e.target.files[0];if(!file)return;processing=true;$('#save-brand').disabled=true;$('#brand-error').textContent='';
+    try{const image=await coverFromFile(file);if(form.isConnected){cover=image;preview();}}
+    catch(error){if(form.isConnected)$('#brand-error').textContent=error.message;}
+    finally{processing=false;if(form.isConnected)$('#save-brand').disabled=false;}
+  };
+  form.onsubmit=async e=>{
+    e.preventDefault();if(processing)return;
+    const categories=$('#brand-categories').value.split('\n').map(x=>x.trim()).filter(Boolean),button=$('#save-brand');button.disabled=true;
+    try{
+      const {brand:saved}=await api('/admin/brands'+(brand?'/'+brand.id:''),brand?'PATCH':'POST',{name:$('#brand-name').value,categories,cover,hidden:brand?!$('#brand-visible').checked:true,...(brand?{expectedRevision:brand.revision}:{})});
+      state.shipments=(await api('/catalog')).shipments;closeDialog();render();
+      if(!brand)editShipment(null,saved);else toast('Настройки бренда сохранены.');
+    }catch(error){if(form.isConnected){$('#brand-error').textContent=error.message;button.disabled=false;}else toast(error.message);}
+  };
 }
 async function showNotifications(){
   showDialog('Уведомления в канал','<p id="notifications-status" class="muted">Проверяем подключение…</p>');
@@ -355,11 +394,11 @@ function showBotSetup(){
 }
 function editShipment(existing,brand){
   importController?.abort();
-  brand ||= BRANDS.find(b=>b.id===existing?.id)||BRANDS.find(b=>b.name.toLowerCase()===String(existing?.brand||'').toLowerCase());
+  brand ||= brandById(existing?.id);
   if(!brand){toast('Не удалось определить бренд.');return;}
   const groups=[...brand.categories],historyProducts=existing?.products||[];
   let products=existing?manualProducts(existing.products.filter(p=>!p.hidden&&p.stock>0).map(p=>({...p,stock:p.stock})),groups):null,warnings=[];
-  showDialog(`${brand.name} — каталог`,`<form id="shipment-form"><p class="fine-print">Загрузите актуальный Excel. Совпадение идёт по артикулу: цена и остаток обновятся, отсутствующие в новом файле товары будут скрыты.</p><p class="fine-print"><strong>Категории:</strong> ${groups.map(esc).join(' · ')}</p><label class="field">${existing?'Обновить каталог из Excel':'Excel с товарами'}<input type="file" id="xlsx-file" accept=".xls,.xlsx" ${existing?'':'required'}></label><div id="import-info">${products?`<p class="import-summary">Сейчас в продаже: ${products.length} позиций</p>`:''}</div><div id="category-editor"></div><p id="import-error" class="error" role="alert"></p><button class="primary full" id="save-shipment" type="submit" ${products?'':'disabled'}>Сохранить каталог</button></form>`);
+  showDialog(`${brand.name} — каталог`,`<form id="shipment-form"><p class="fine-print">Загрузите актуальный Excel. Совпадение идёт по артикулу: цена и остаток обновятся, отсутствующие в новом файле товары будут скрыты.</p><p class="fine-print"><strong>Категории:</strong> ${groups.map(esc).join(' · ')}</p><label class="field">${existing?'Обновить каталог из Excel':'Excel с товарами'}<input type="file" id="xlsx-file" accept=".xls,.xlsx" ${existing?'':'required'}></label><div id="import-info">${products?`<p class="import-summary">Сейчас в продаже: ${products.length} позиций</p>`:''}</div><div id="category-editor"></div><label class="field checkbox-field"><input id="publish-brand" type="checkbox" ${!existing||!brand.hidden?'checked':''}> Показывать бренд покупателям после сохранения</label><p id="import-error" class="error" role="alert"></p><button class="primary full" id="save-shipment" type="submit" ${products?'':'disabled'}>Сохранить каталог</button></form>`);
   const form=$('#shipment-form');
   function reviewCategories(){
     const container=$('#category-editor');if(!products){container.textContent='';return;}
@@ -392,7 +431,7 @@ function editShipment(existing,brand){
     if(warnings.length&&!$('#accept-warnings')?.checked){$('#import-error').textContent='Подтвердите проверку замечаний.';return;}
     const b=$('#save-shipment');b.disabled=true;$('#import-error').textContent='';
     try{
-      await api('/admin/shipments','POST',{id:brand.id,title:brand.name,brand:brand.name,status:'arrived',stockMode:'live',description:'',groupingMode:'manual',groups,products});
+      await api('/admin/shipments','POST',{id:brand.id,title:brand.name,brand:brand.name,status:'arrived',stockMode:'live',description:'',groupingMode:'manual',groups,products,publishBrand:$('#publish-brand').checked,expectedBrandRevision:brand.revision});
       closeDialog();await refresh();toast(`${brand.name}: каталог обновлён.`);
     }catch(e){if($('#import-error')){$('#import-error').textContent=e.message;b.disabled=false;}else toast(e.message);}
   };
@@ -408,13 +447,13 @@ async function refresh({background=false}={}){
   const button=$('#refresh');button.disabled=true;
   refreshPromise=(async()=>{
     try{
-      const previous=JSON.stringify(state.shipments);
+      const previous=JSON.stringify([state.shipments,state.brands]);
       const shipments=(await api('/catalog')).shipments;
       if(background&&dialog.open)return;
       state.shipments=shipments;
-      const changed=previous!==JSON.stringify(state.shipments);
+      const changed=previous!==JSON.stringify([state.shipments,state.brands]);
       if(background && (!changed||dialog.open))return;
-      if(state.view==='shipments' && $('#shipment-grid')){cards();$('.count').textContent=BRANDS.length+' бренда';cartBar();return;}
+      if(state.view==='shipments' && $('#shipment-grid')){cards();$('.count').textContent='Брендов: '+visibleBrands().length;cartBar();return;}
       if(state.view==='shipments' && $('#product-search')){
         const input=$('#product-search'),query=input.value,focused=document.activeElement;
         if(!activeShipment()){state.current=null;render();return;}

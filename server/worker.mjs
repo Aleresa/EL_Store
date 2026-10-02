@@ -67,7 +67,7 @@ export class NewsletterStore {
         await readJson(request);
         return json(await this.setupBot(url.origin));
       }
-      if(path==='/api/catalog' && request.method==='GET') return json({shipments:this.inventory.catalog(admin)});
+      if(path==='/api/catalog' && request.method==='GET') return json({shipments:this.inventory.catalog(admin),brands:this.inventory.brands(admin)});
       if(path==='/api/orders' && request.method==='GET') return json({orders:this.inventory.orders(user,admin && url.searchParams.get('all')==='1')});
       if(path==='/api/orders' && request.method==='POST') {
         if(!this.env.ORDER_CHAT_ID) throw new ApiError(503,'Приём заказов пока не открыт.');
@@ -85,6 +85,14 @@ export class NewsletterStore {
         const order='lines' in input?this.inventory.editOrder(user,id,input,admin):this.inventory.changeOrder(user,id,input.status,admin,input.expectedRevision);
         this.ctx.waitUntil(this.flush());
         return json({order});
+      }
+      if(path==='/api/admin/brands'&&request.method==='POST'){
+        if(!admin)throw new ApiError(403,'Раздел доступен только владельцу.');
+        return json({brand:this.inventory.saveBrand(await readJson(request))},201);
+      }
+      if(/^\/api\/admin\/brands\/[a-zA-Z0-9_-]{1,80}$/.test(path)&&request.method==='PATCH'){
+        if(!admin)throw new ApiError(403,'Раздел доступен только владельцу.');
+        return json({brand:this.inventory.saveBrand(await readJson(request),path.split('/').pop())});
       }
       if(/^\/api\/admin\/shipments\/[a-zA-Z0-9_-]{1,80}$/.test(path) && request.method==='DELETE') {
         if(!admin)throw new ApiError(403,'Раздел доступен только владельцу.');
@@ -247,7 +255,7 @@ export class NewsletterStore {
       if(command==='/id') text=`Ваш Telegram ID: ${message.from.id}`;
       if(command==='/start') text='Откройте товары, выберите бренд и оформите заказ. Остатки обновляются после каждого заказа и загрузки Excel.';
       const admin=isAdmin({id:message.from.id},this.env);
-      if(command==='/admin' && admin) text='Откройте приложение → Управление. Здесь можно обновить каталоги Apple и Remax из Excel и обработать заказы.';
+      if(command==='/admin' && admin) text='Откройте приложение → Управление. Здесь можно обновить каталоги брендов из Excel и обработать заказы.';
       if(message.forward_origin?.type==='channel' && admin) text=`ID канала: ${message.forward_origin.chat.id}\nДобавьте бота администратором с правом публикации, затем укажите этот ID в ORDER_CHAT_ID.`;
       if(message.document && admin) text='Для обновления каталога откройте приложение → Управление → нужный бренд → Загрузить/Обновить Excel.';
       if(text) await telegram(this.env,'sendMessage',{chat_id:message.chat.id,text,reply_markup:{inline_keyboard:[[{text:'Сделать Заказ',url:this.env.MINI_APP_URL || 'https://el-store.elereas.workers.dev'}]]}});

@@ -1,11 +1,11 @@
-import {brandById} from './catalog-config.js';
+import {catalogBrand} from './catalog-config.js';
 export const cartKey=(shipmentId,id)=>`${shipmentId}:${id}`;
 export const cartEntry=(shipmentId,p,quantity)=>({shipmentId,id:p.id,sku:p.sku,name:p.name,price:p.price,quantity});
 export function readCart(value){
   if(!value||typeof value!=='object'||Array.isArray(value))return {};
   const cart={};
   for(const l of Object.values(value).slice(0,100)){
-    if(!l||!brandById(l.shipmentId)||typeof l.id!=='string'||!/^[-\w]{1,80}$/.test(l.id)||!Number.isSafeInteger(l.quantity)||l.quantity<1||l.quantity>10000000||!Number.isSafeInteger(l.price)||l.price<0||l.price>100000000)continue;
+    if(!l||typeof l.shipmentId!=='string'||!/^[-\w]{1,80}$/.test(l.shipmentId)||typeof l.id!=='string'||!/^[-\w]{1,80}$/.test(l.id)||!Number.isSafeInteger(l.quantity)||l.quantity<1||l.quantity>10000000||!Number.isSafeInteger(l.price)||l.price<0||l.price>100000000)continue;
     cart[cartKey(l.shipmentId,l.id)]=cartEntry(l.shipmentId,{id:l.id,sku:String(l.sku||l.id).slice(0,80),name:String(l.name||l.id).slice(0,500),price:l.price},l.quantity);
   }
   return cart;
@@ -14,8 +14,8 @@ export function reconcileCart(cart,catalogs){
   const next={},changes=[];
   for(const line of Object.values(cart)){
     const catalog=catalogs.find(s=>s.id===line.shipmentId),p=catalog?.products.find(p=>p.id===line.id);
-    const label=`${brandById(line.shipmentId)?.name||line.shipmentId} · ${line.sku}`;
-    if(!brandById(line.shipmentId)||catalog?.status!=='arrived'||!p||p.hidden||p.stock<=0||!brandById(line.shipmentId).categories.includes(p.group)){
+    const brand=catalogBrand(catalog),label=`${brand?.name||line.shipmentId} · ${line.sku}`;
+    if(!brand||brand.hidden||catalog?.hidden||catalog?.status!=='arrived'||!p||p.hidden||p.stock<=0||!brand.categories.includes(p.group)){
       changes.push(`${label}: недоступен, убран из корзины.`);continue;
     }
     const quantity=Math.min(line.quantity,p.stock);

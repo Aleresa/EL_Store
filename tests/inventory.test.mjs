@@ -190,7 +190,7 @@ test('removed catalogs cannot be imported or ordered while existing orders remai
   sql.exec('UPDATE orders SET shipment=?,data=? WHERE id=?','retired',JSON.stringify({...order,shipmentId:'retired'}),order.id);
   assert.deepEqual(inv.catalog(),[]);
   assert.deepEqual(inv.catalog(true),[]);
-  assert.throws(()=>inv.importShipment({...catalog,id:'retired'}),/Apple или Remax/);
+  assert.throws(()=>inv.importShipment({...catalog,id:'retired'}),/создайте бренд/);
   assert.throws(()=>inv.placeOrder(user,{...request('after-removal'),shipmentId:'retired'}),/закрыты/);
   assert.equal(inv.orders(user)[0].id,order.id);
   inv.changeOrder(user,order.id,'cancelled',false,1);
@@ -346,4 +346,54 @@ test('failed replacement delivery retains the queued order for a later retry',as
   assert.equal(store.notificationStatus().lastError.code,503);
   available=true;await store.flush();assert.equal(store.notificationStatus().pending,0);
   assert.equal(store.inventory.one('SELECT message_id FROM order_messages WHERE order_id=?',order.id).message_id,202);
+});
+
+test('custom brand can be created, published, ordered, renamed and hidden without losing history',()=>{
+  const {inv,sql,txn}=fixture();
+  const brand=inv.saveBrand({name:'Baseus',categories:['Кабели','Зарядки'],cover:null,hidden:true});
+  assert(!inv.brands().some(b=>b.id===brand.id));
+  const input={id:brand.id,title:'Baseus',status:'arrived',stockMode:'live',groupingMode:'manual',groups:brand.categories,products:[{id:'p1',sku:'BS-1',name:'Кабель Baseus',group:'Кабели',stock:5,price:30000}],publishBrand:true,expectedBrandRevision:brand.revision};
+  inv.importShipment(input);
+  assert(inv.brands().some(b=>b.id===brand.id));
+  const order=inv.placeOrder(user,{requestKey:'custom-brand',lines:[{shipmentId:brand.id,id:'p1',quantity:2,expectedPrice:30000},{shipmentId:'apple',id:'p1',quantity:1,expectedPrice:16000}]});
+  assert.equal(order.total,76000);assert.equal(stock(inv,brand.id,'p1'),3);
+  const current=inv.brand(brand.id);
+  const hidden=inv.saveBrand({...current,name:'Baseus Pro',hidden:true,expectedRevision:current.revision},brand.id);
+  assert(!inv.catalog().some(s=>s.id===brand.id));assert(!inv.brands().some(b=>b.id===brand.id));
+  assert(inv.catalog(true).some(s=>s.id===brand.id));
+  assert.throws(()=>inv.placeOrder(user,{requestKey:'hidden-brand',lines:[{shipmentId:brand.id,id:'p1',quantity:1}]}),/закрыты/);
+  assert.equal(inv.orders(user)[0].shipmentTitle,'Apple + Baseus');
+  inv.changeOrder(user,order.id,'cancelled');assert.equal(stock(inv,brand.id,'p1'),5);
+  const restarted=new Inventory(sql,txn);assert.equal(restarted.brand(brand.id).hidden,true);
+  restarted.saveBrand({...hidden,hidden:false,expectedRevision:hidden.revision},brand.id);
+  assert.equal(restarted.catalog().find(s=>s.id===brand.id).title,'Baseus Pro');
+});
+
+test('brand settings reject duplicate names, invalid covers, stale changes and removal of occupied categories',()=>{
+  const {inv}=fixture(),apple=inv.brand('apple');
+  assert.throws(()=>inv.saveBrand({name:' apple ',categories:['Товары'],cover:null,hidden:true}),/уже существует/);
+  assert.throws(()=>inv.saveBrand({name:'Brand',categories:['Товары','товары'],cover:null,hidden:true}),/уникальных/);
+  assert.throws(()=>inv.saveBrand({name:'Brand',categories:['Товары'],cover:'https://example.com/image.png',hidden:true}),/Обложка/);
+  assert.throws(()=>inv.saveBrand({...apple,categories:['Копия'],expectedRevision:apple.revision},apple.id),/есть товары/);
+  const changed=inv.saveBrand({...apple,categories:[...apple.categories,'Адаптеры'],expectedRevision:apple.revision},apple.id);
+  assert.throws(()=>inv.saveBrand({...apple,expectedRevision:apple.revision},apple.id),/уже изменён/);
+  assert.deepEqual(inv.catalog()[0].groups,changed.categories);
+  assert.equal(stock(inv,'apple','p1'),10);
+});
+
+test('stale Excel cannot undo visibility or category changes made in brand settings',()=>{
+  const {inv,catalog}=fixture(),brand=inv.brand('apple');
+  inv.saveBrand({...brand,hidden:true,expectedRevision:brand.revision},brand.id);
+  assert.throws(()=>inv.importShipment({...catalog,publishBrand:true,expectedBrandRevision:brand.revision}),/изменились/);
+  assert.equal(inv.brand('apple').hidden,true);assert.equal(stock(inv,'apple','p1'),10);
+});
+
+test('creating and changing brands requires administrator authentication',async()=>{
+  const {store}=notificationFixture();
+  const headers={'Content-Type':'application/json','X-Telegram-Init-Data':signedData('test:notifications',{user:JSON.stringify({id:456,first_name:'Buyer'})})};
+  for(const [path,method] of [['/api/admin/brands','POST'],['/api/admin/brands/apple','PATCH']]){
+    const response=await store.fetch(new Request('https://app'+path,{method,headers,body:JSON.stringify({name:'Forged',categories:['Category'],hidden:false,cover:null,expectedRevision:1})}));
+    assert.equal(response.status,403);
+  }
+  assert.equal(store.inventory.brands(true).length,2);
 });

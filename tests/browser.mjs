@@ -250,6 +250,53 @@ try{
   assert.match(await page.locator('#notification-details').textContent(),/Ожидают отправки: 0/);
   await page.locator('#close-dialog').click();
 
+  // Create a third brand entirely through the admin UI, including cover and Excel.
+  await page.locator('#add-brand').click();
+  await page.locator('#brand-name').fill('Baseus');
+  await page.locator('#brand-categories').fill('Кабели\nЗарядки');
+  const coverData=await page.evaluate(()=>{const c=document.createElement('canvas');c.width=40;c.height=40;const ctx=c.getContext('2d');ctx.fillStyle='#ffdd00';ctx.fillRect(0,0,40,40);return c.toDataURL('image/png').split(',')[1];});
+  await page.locator('#brand-cover-file').setInputFiles({name:'cover.png',mimeType:'image/png',buffer:Buffer.from(coverData,'base64')});
+  await page.waitForSelector('.brand-cover-preview');await page.locator('#save-brand').click();
+  await page.waitForSelector('#xlsx-file');
+  const customBrand=store.inventory.brands(true).find(b=>b.name==='Baseus');
+  assert(customBrand);assert.equal(customBrand.hidden,true);
+  await page.locator('#xlsx-file').setInputFiles({name:'Baseus.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:await supplierXlsx([['Наименование','Код','Доступно','Цена продажи'],['Кабель Baseus USB-C','BS1','6','300']])});
+  await page.waitForSelector('[data-product-category="BS1"]');await page.locator('[data-product-category="BS1"]').selectOption('Кабели');
+  if(await page.locator('#accept-warnings').count())await page.locator('#accept-warnings').check();
+  assert.equal(await page.locator('#publish-brand').isChecked(),true);
+  await page.locator('#save-shipment').click();await page.waitForSelector('#shipment-form',{state:'hidden'});
+  await page.locator('[data-view="shipments"]').click();
+  assert.equal(await page.locator('.brand-card').count(),3);
+  const customCard=page.locator(`[data-brand="${customBrand.id}"]`);
+  assert.equal(await customCard.locator('.brand-cover').count(),1);
+  assert.equal(await customCard.locator('.brand-visual').evaluate(el=>getComputedStyle(el).backgroundColor),'rgba(0, 0, 0, 0)');
+  await page.screenshot({path:'test-results/store-custom-brand-home.png',fullPage:true});
+  await page.locator('#catalog-search').fill('Baseus');await page.waitForSelector('[data-search-result]');
+  assert.equal(await page.locator('[data-search-result]').count(),1);await page.locator('[data-search-result]').click();
+  await page.locator('[data-step="1"][data-id="BS1"]').click();
+  await page.reload();await page.waitForSelector('#open-cart');await page.locator('#open-cart').click();
+  await page.waitForSelector('#dialog[open] #submit-placeOrder');
+  assert.equal(await page.locator(`[data-cart-qty="${customBrand.id}:BS1"]`).inputValue(),'1');
+  await page.locator('#submit-placeOrder').click();await page.waitForSelector('.order');
+  const customOrder=store.inventory.orders({id:'123'})[0];assert.equal(customOrder.shipmentTitle,'Baseus');
+
+  // Hiding and renaming retain inventory and order history; showing again restores the card.
+  await page.locator('#admin-tab').click();await page.locator(`[data-brand-edit="${customBrand.id}"]`).click();
+  await page.locator('#brand-name').fill('Baseus Pro');await page.locator('#brand-visible').uncheck();
+  await page.locator('#brand-categories').fill('Кабели\nЗарядки\nАккумуляторы');
+  await page.locator('#save-brand').click();await page.waitForSelector('#brand-form',{state:'hidden'});
+  await page.locator('[data-view="shipments"]').click();assert.equal(await page.locator('.brand-card').count(),2);
+  await page.locator('#catalog-search').fill('Baseus');await page.waitForFunction(()=>document.querySelector('#search-results')?.textContent.includes('Ничего не найдено'));
+  assert.equal(store.inventory.orders({id:'123'})[0].shipmentTitle,'Baseus');
+  assert.equal(store.inventory.catalog(true).find(s=>s.id===customBrand.id).products[0].stock,5);
+  await page.locator('#admin-tab').click();await page.locator(`[data-brand-edit="${customBrand.id}"]`).click();
+  assert.equal(await page.locator('#brand-visible').isChecked(),false);await page.locator('#brand-visible').check();
+  await page.locator('#save-brand').click();await page.waitForSelector('#brand-form',{state:'hidden'});
+  await page.locator('[data-view="shipments"]').click();assert.equal(await page.locator('.brand-card').count(),3);
+  await page.locator(`[data-brand="${customBrand.id}"]`).click();
+  assert.deepEqual(await page.locator('[data-category] strong').allTextContents(),['Кабели','Зарядки','Аккумуляторы']);
+  await page.setViewportSize({width:320,height:740});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+
   assert.deepEqual(errors,[]);
   console.log('Browser checks passed: shared persistent cart, cross-brand order/edit/cancel, lost-response recovery, price/stock reconciliation, photo viewer, repeat order, sorting/model filters, responsive layout and Excel import.');
 }finally{

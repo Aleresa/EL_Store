@@ -39,3 +39,16 @@ test('sort by price, name and first-added date without modifying the catalog',()
   assert.deepEqual(sortProducts(items,'new').map(p=>p.id),['b','a']);
   assert.equal(items[0].id,'a');
 });
+
+test('custom brand survives cart restore and participates in checkout and search until hidden',async()=>{
+  const {searchCatalog}=await import('../public/catalog-config.js');
+  const brandInfo={id:'brand-custom',name:'Baseus',categories:['Кабели'],hidden:false};
+  const catalog={id:brandInfo.id,brandInfo,status:'arrived',products:[{id:'cable',sku:'BS-1',name:'Кабель',group:'Кабели',stock:5,price:12300}]};
+  const cart=readCart({one:cartEntry(brandInfo.id,catalog.products[0],2)});
+  assert.equal(Object.keys(cart).length,1);
+  assert.equal(Object.keys(reconcileCart(cart,[catalog]).cart).length,1);
+  assert.equal(searchCatalog([catalog],'baseus кабель').length,1);
+  const hidden={...catalog,hidden:true,brandInfo:{...brandInfo,hidden:true}};
+  assert.equal(Object.keys(reconcileCart(cart,[hidden]).cart).length,0);
+  assert.equal(searchCatalog([hidden],'baseus').length,0);
+});

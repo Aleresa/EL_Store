@@ -1,6 +1,6 @@
 import {ApiError} from './auth.mjs';
 import {groupKey} from '../public/product-groups.js';
-import {brandById} from '../public/catalog-config.js';
+import {DEFAULT_BRANDS} from '../public/catalog-config.js';
 
 const ACTIVE = new Set(['arrived']);
 const STATUSES = new Set(['draft','arrived','closed']);
@@ -19,6 +19,12 @@ export class Inventory {
     sql.exec('CREATE TABLE IF NOT EXISTS order_edits (user_id TEXT NOT NULL, request_key TEXT NOT NULL, fingerprint TEXT NOT NULL, PRIMARY KEY(user_id,request_key))');
     sql.exec('CREATE INDEX IF NOT EXISTS orders_user_status ON orders(user_id,status)');
     sql.exec('CREATE INDEX IF NOT EXISTS orders_shipment_status ON orders(shipment,status)');
+    sql.exec('CREATE TABLE IF NOT EXISTS brands (id TEXT PRIMARY KEY, data TEXT NOT NULL)');
+    for(const brand of DEFAULT_BRANDS){
+      const saved=this.one('SELECT data FROM shipments WHERE id=?',brand.id),catalog=saved&&JSON.parse(saved.data);
+      const data={...brand,categories:catalog?.groups?.length?catalog.groups:brand.categories,cover:null,hidden:false,revision:1};
+      sql.exec('INSERT OR IGNORE INTO brands(id,data) VALUES(?,?)',brand.id,JSON.stringify(data));
+    }
     // Manager assignment was removed from EL Store. Delete its old table and strip legacy order snapshots.
     sql.exec('DROP TABLE IF EXISTS managers');
     for(const row of [...sql.exec('SELECT id,data FROM orders')]) {
@@ -31,15 +37,46 @@ export class Inventory {
   }
   rows(query,...bindings) { return [...this.sql.exec(query,...bindings)]; }
   one(query,...bindings) { return this.rows(query,...bindings)[0]; }
+  brand(id) {const row=this.one('SELECT data FROM brands WHERE id=?',id);return row?JSON.parse(row.data):null;}
+  brands(admin=false) {return this.rows('SELECT data FROM brands ORDER BY rowid').map(r=>JSON.parse(r.data)).filter(b=>admin||!b.hidden);}
+  saveBrand(input,id=null) {
+    if(id!==null&&!validId(id))throw new ApiError(400,'Некорректный бренд.');
+    const name=trim(input.name,80),categories=input.categories;
+    if(!name||typeof input.name!=='string'||input.name.trim().length>80)throw new ApiError(400,'Укажите название бренда до 80 символов.');
+    if(!Array.isArray(categories)||!categories.length||categories.length>100||categories.some(c=>typeof c!=='string'||!c.trim()||c.length>80)||new Set(categories.map(groupKey)).size!==categories.length)throw new ApiError(400,'Укажите от 1 до 100 уникальных категорий, по одной на строку.');
+    const names=categories.map(c=>c.trim().replace(/\s+/g,' '));
+    if(typeof input.hidden!=='boolean')throw new ApiError(400,'Укажите видимость бренда.');
+    const cover=input.cover??null;
+    if(cover!==null&&(typeof cover!=='string'||!/^data:image\/(webp|png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(cover)||cover.length>350000))throw new ApiError(400,'Обложка слишком большая или имеет неверный формат.');
+    return this.transaction(()=>{
+      const previous=id&&this.brand(id);
+      if(id&&!previous)throw new ApiError(404,'Бренд не найден.');
+      if(previous&&input.expectedRevision!==previous.revision)throw new ApiError(409,'Бренд уже изменён. Обновите страницу и откройте настройки заново.');
+      if(this.brands(true).some(b=>b.id!==id&&groupKey(b.name)===groupKey(name)))throw new ApiError(409,'Бренд с таким названием уже существует.');
+      if(!id&&this.brands(true).length>=100)throw new ApiError(400,'Можно создать до 100 брендов.');
+      if(previous){
+        for(const row of this.rows('SELECT data,placed FROM products WHERE shipment=?',id)){
+          const p=JSON.parse(row.data);
+          if((!p.hidden||row.placed>0)&&p.group&&!names.some(n=>groupKey(n)===groupKey(p.group)))throw new ApiError(409,`В категории «${p.group}» есть товары. Сначала добавьте новую категорию и перенесите в неё товары через редактор каталога.`);
+        }
+      }
+      const brand={id:id||'brand-'+crypto.randomUUID(),name,categories:names,cover,hidden:input.hidden,revision:(previous?.revision||0)+1};
+      this.sql.exec('INSERT INTO brands(id,data) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data',brand.id,JSON.stringify(brand));
+      const shipment=this.one('SELECT data FROM shipments WHERE id=?',brand.id);
+      if(shipment){const data={...JSON.parse(shipment.data),title:name,brand:name,groups:names};this.sql.exec('UPDATE shipments SET data=? WHERE id=?',JSON.stringify(data),brand.id);}
+      return brand;
+    });
+  }
   catalog(admin=false) {
-    return this.rows('SELECT data FROM shipments').map(r=>JSON.parse(r.data)).filter(s=>brandById(s.id) && (admin || s.status !== 'draft')).map(s=>{
+    return this.rows('SELECT data FROM shipments').map(r=>JSON.parse(r.data)).filter(s=>this.brand(s.id) && (admin || !this.brand(s.id).hidden&&s.status !== 'draft')).map(s=>{
       const groups=s.groupingMode==='manual'?(s.groups||[]):[];
       const retail=s.stockMode==='live';
       const products=this.rows('SELECT * FROM products WHERE shipment=? ORDER BY rowid',s.id).map((row,index)=>{
         const {subgroup,group,...p}=JSON.parse(row.data);
         return {...p,group:groups.find(g=>groupKey(g)===groupKey(group))||'',position:p.position??index,stock:row.total-row.placed,...(admin?{total:row.total,placed:row.placed}:{})};
       }).filter(p=>admin || !retail || (!p.hidden && p.stock>0)).sort((a,b)=>a.position-b.position);
-      return {...s,groups,products};
+      const {cover,...brandInfo}=this.brand(s.id);
+      return {...s,title:brandInfo.name,brand:brandInfo.name,brandInfo,hidden:brandInfo.hidden,groups,products};
     });
   }
   deleteShipment(id) {
@@ -55,7 +92,10 @@ export class Inventory {
     });
   }
   importShipment(input) {
-    if(!brandById(input.id))throw new ApiError(400,'Выберите Apple или Remax.');
+    const brand=this.brand(input.id);
+    if(!brand)throw new ApiError(400,'Сначала создайте бренд в разделе управления.');
+    if(input.expectedBrandRevision!==undefined&&input.expectedBrandRevision!==brand.revision)throw new ApiError(409,'Настройки бренда изменились. Откройте каталог заново.');
+    if(input.publishBrand!==undefined&&typeof input.publishBrand!=='boolean')throw new ApiError(400,'Некорректная видимость бренда.');
     if (!validId(input.id) || !trim(input.title,160) || !STATUSES.has(input.status) || !Array.isArray(input.products) || !input.products.length || input.products.length>3000) throw new ApiError(400,'Проверьте название, статус и список товаров.');
     for (const d of [input.eta,input.publishedAt]) if (d != null && d !== '' && (!/^\d{4}-\d{2}-\d{2}$/.test(d) || !Number.isFinite(Date.parse(d)) || new Date(d).toISOString().slice(0,10)!==d)) throw new ApiError(400,'Некорректная дата.');
     const old = this.one('SELECT data FROM shipments WHERE id=?',input.id);
@@ -63,9 +103,9 @@ export class Inventory {
     if(input.groupingMode!==undefined&&input.groupingMode!=='manual')throw new ApiError(400,'Некорректный режим групп.');
     const groups=input.groupingMode==='manual'?(input.groups??[]):[];
     if(!Array.isArray(groups)||groups.length>100||groups.some(g=>typeof g!=='string'||!g.trim()||g.length>80)||new Set(groups.map(groupKey)).size!==groups.length)throw new ApiError(400,'Укажите до 100 групп с уникальными названиями до 80 символов.');
-    const fixedCategories=input.stockMode==='live'?brandById(input.id)?.categories:null;
+    const fixedCategories=input.stockMode==='live'?brand.categories:null;
     const groupNames=fixedCategories?[...fixedCategories]:groups.map(g=>g.trim().replace(/\s+/g,' '));
-    const shipment = {id:input.id,title:trim(input.title,160),brand:trim(input.brand,80),description:trim(input.description,3000),status:input.status,stockMode:input.stockMode==='live'?'live':(previous?.stockMode||'legacy'),groupingMode:'manual',groups:groupNames,eta:input.eta || null,
+    const shipment = {id:input.id,title:brand.name,brand:brand.name,description:trim(input.description,3000),status:input.status,stockMode:input.stockMode==='live'?'live':(previous?.stockMode||'legacy'),groupingMode:'manual',groups:groupNames,eta:input.eta || null,
       publishedAt:input.publishedAt || previous?.publishedAt || (input.status === 'draft'?null:new Date().toISOString().slice(0,10))};
     const ids = new Set();
     const products = input.products.map((p,position)=>{
@@ -108,6 +148,7 @@ export class Inventory {
         for(const p of products) this.sql.exec('INSERT INTO products(shipment,id,data,total) VALUES(?,?,?,?) ON CONFLICT(shipment,id) DO UPDATE SET data=excluded.data,total=excluded.total',shipment.id,p.id,JSON.stringify({...p,addedAt:byId.has(p.id)?(JSON.parse(byId.get(p.id).data).addedAt||previous?.publishedAt||'1970-01-01'):new Date().toISOString()}),p.total);
         for(const p of current) if(!ids.has(p.id)) this.sql.exec('DELETE FROM products WHERE shipment=? AND id=?',shipment.id,p.id);
       }
+      if(input.publishBrand!==undefined&&brand.hidden===input.publishBrand)this.sql.exec('UPDATE brands SET data=? WHERE id=?',JSON.stringify({...brand,hidden:!input.publishBrand,revision:brand.revision+1}),brand.id);
       return shipment;
     });
   }
@@ -140,7 +181,7 @@ export class Inventory {
         const shipmentId=l.shipmentId??input.shipmentId;
         const shipmentRow=this.one('SELECT data FROM shipments WHERE id=?',shipmentId);
         const shipment=shipmentRow&&JSON.parse(shipmentRow.data);
-        if(!shipment||!brandById(shipmentId)||!ACTIVE.has(shipment.status))throw new ApiError(409,'Заказы по этому каталогу закрыты.');
+        if(!shipment||!this.brand(shipmentId)||this.brand(shipmentId).hidden||!ACTIVE.has(shipment.status))throw new ApiError(409,'Заказы по этому каталогу закрыты.');
         catalogs.set(shipmentId,shipment.title);
         const row=this.one('SELECT * FROM products WHERE shipment=? AND id=?',shipmentId,l.id);
         if(!row)throw new ApiError(409,'Товар больше не доступен.');
@@ -178,7 +219,7 @@ export class Inventory {
       const detailed=lines.map(line=>{
         const l={...line,shipmentId:line.shipmentId??row.shipment};
         const shipmentRow=this.one('SELECT data FROM shipments WHERE id=?',l.shipmentId),shipment=shipmentRow&&JSON.parse(shipmentRow.data);
-        if(!shipment||(!admin&&(!brandById(l.shipmentId)||!ACTIVE.has(shipment.status))))throw new ApiError(409,'Изменение этого каталога закрыто. Обратитесь в магазин.');
+        if(!shipment||(!admin&&(!this.brand(l.shipmentId)||this.brand(l.shipmentId).hidden||!ACTIVE.has(shipment.status))))throw new ApiError(409,'Изменение этого каталога закрыто. Обратитесь в магазин.');
         catalogs.set(l.shipmentId,shipment.title);
         const productRow=this.one('SELECT * FROM products WHERE shipment=? AND id=?',l.shipmentId,l.id);
         if(!productRow)throw new ApiError(409,'Товар больше не доступен.');
