@@ -165,7 +165,7 @@ test('only admin can configure bot and setup uses the app URL',async t=>{
   assert.deepEqual(await response.json(),{ok:true,webhookUrl:'https://el-store.elereas.workers.dev/telegram/webhook'});
   assert.deepEqual(calls.map(c=>c.method).sort(),['setChatMenuButton','setMyCommands','setWebhook'].sort());
   assert.equal(calls.find(c=>c.method==='setWebhook').body.url,'https://el-store.elereas.workers.dev/telegram/webhook');
-  assert.equal(calls.find(c=>c.method==='setChatMenuButton').body.menu_button.text,'Товары');
+  assert.equal(calls.find(c=>c.method==='setChatMenuButton').body.menu_button.text,'Сделать Заказ');
 });
 
 test('order notification delivery sends no manager line',async t=>{
@@ -261,4 +261,53 @@ test('newness survives reimport and reappearance; newly added SKUs get their fir
   const products=inv.catalog()[0].products;
   assert.equal(products.find(p=>p.id==='p1').addedAt,'2020-01-01T00:00:00Z');
   assert(Date.parse(products.find(p=>p.id==='new').addedAt)>Date.parse('2020-01-01'));
+});
+
+function notificationFixture(env={}){
+  const {sql,txn}=fixture();let alarm=null;
+  const ctx={storage:{sql,transactionSync:txn,getAlarm:async()=>alarm,setAlarm:async value=>alarm=value,deleteAlarm:async()=>alarm=null},waitUntil:()=>{}};
+  const store=new NewsletterStore(ctx,{BOT_TOKEN:'test:notifications',ORDER_CHAT_ID:' -100123 ',BOT_USERNAME:'E_NewSletters_Bot',ADMIN_IDS:'123',...env});
+  return {store,ctx,alarm:()=>alarm};
+}
+test('Telegram error is retained for admin and queued order is delivered on retry without creating another message',async t=>{
+  const {store,alarm}=notificationFixture(),calls=[];let permitted=false;
+  t.mock.method(globalThis,'fetch',async(url,options)=>{
+    const body=JSON.parse(options.body);calls.push(body);
+    return permitted?Response.json({ok:true,result:{message_id:77}}):Response.json({ok:false,error_code:403,description:'Forbidden: bot is not a member of the channel chat'},{status:403});
+  });
+  store.inventory.placeOrder(user,request('pending',1));await store.flush();
+  const failure=store.notificationStatus();
+  assert.equal(failure.pending,1);assert.equal(failure.lastError.code,403);assert.match(failure.lastError.message,/право/);assert(alarm());
+  assert.equal(calls[0].chat_id,'-100123');
+  permitted=true;await store.flush();
+  assert.equal(store.notificationStatus().pending,0);assert.equal(store.notificationStatus().lastError,null);assert(store.notificationStatus().lastSuccess);
+  const sentCalls=calls.length;await store.flush();assert.equal(calls.length,sentCalls);
+});
+test('channel diagnostics check actual publishing rights and never send a test message',async t=>{
+  const {store}=notificationFixture(),methods=[];let permitted=false;
+  t.mock.method(globalThis,'fetch',async(url)=>{
+    const method=new URL(url).pathname.split('/').pop();methods.push(method);
+    const result=method==='getMe'?{id:7,username:'E_NewSletters_Bot'}:method==='getChat'?{id:-100123,title:'Рабочий канал',type:'channel'}:{status:'administrator',can_post_messages:permitted};
+    return Response.json({ok:true,result});
+  });
+  assert.equal((await store.checkNotifications()).check.ok,false);
+  permitted=true;const result=await store.checkNotifications();assert.equal(result.check.ok,true);assert.equal(result.channel.title,'Рабочий канал');
+  assert(!methods.includes('sendMessage'));
+  const invalid=notificationFixture({ORDER_CHAT_ID:'https://t.me/+invite'}).store;
+  assert.match((await invalid.checkNotifications()).check.message,/Пригласительная ссылка/);
+});
+test('notification diagnostics and retry are admin-only',async()=>{
+  const {store}=notificationFixture();
+  for(const [path,method] of [['/api/admin/notifications','GET'],['/api/admin/notifications/check','POST'],['/api/admin/notifications/retry','POST']]){
+    const headers={'Content-Type':'application/json','X-Telegram-Init-Data':signedData('test:notifications',{user:JSON.stringify({id:456,first_name:'Buyer'})})};
+    const response=await store.fetch(new Request('https://app'+path,{method,headers,...(method==='POST'?{body:'{}'}:{})}));
+    assert.equal(response.status,403);
+  }
+});
+test('menu update changes global and private-chat buttons without touching the webhook',async t=>{
+  const {store}=notificationFixture(),calls=[];
+  t.mock.method(globalThis,'fetch',async(url,options)=>{calls.push({method:new URL(url).pathname.split('/').pop(),body:JSON.parse(options.body)});return Response.json({ok:true,result:true});});
+  await store.syncMenu('123');await store.syncMenu('123');
+  assert.equal(calls.length,2);assert(calls.every(c=>c.method==='setChatMenuButton'&&c.body.menu_button.text==='Сделать Заказ'));
+  assert.equal(calls[1].body.chat_id,'123');
 });

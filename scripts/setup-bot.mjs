@@ -7,5 +7,5 @@ const call=async(method,body)=>{
   console.log(`${method}: OK`);
 };
 await call('setWebhook',{url:new URL('/telegram/webhook',APP_URL).href,secret_token:WEBHOOK_SECRET,allowed_updates:['message']});
-await call('setChatMenuButton',{menu_button:{type:'web_app',text:'Поступление',web_app:{url:APP_URL}}});
-await call('setMyCommands',{commands:[{command:'start',description:'Открыть поступление'},{command:'id',description:'Узнать свой Telegram ID'},{command:'admin',description:'Управление поступлениями'}]});
+await call('setChatMenuButton',{menu_button:{type:'web_app',text:'Сделать Заказ',web_app:{url:APP_URL}}});
+await call('setMyCommands',{commands:[{command:'start',description:'Сделать заказ'},{command:'id',description:'Узнать свой Telegram ID'},{command:'admin',description:'Управление магазином'}]});

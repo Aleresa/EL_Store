@@ -15,6 +15,7 @@ let alarm=null;
 const ctx={storage:{sql,getAlarm:async()=>alarm,setAlarm:async value=>alarm=value,deleteAlarm:async()=>alarm=null,transactionSync(fn){db.exec('BEGIN');try{const result=fn();db.exec('COMMIT');return result;}catch(error){db.exec('ROLLBACK');throw error;}}},waitUntil:()=>{}};
 const store=new NewsletterStore(ctx,{BOT_TOKEN:token,ADMIN_IDS:'123',ORDER_CHAT_ID:'test-only',MINI_APP_URL:'https://el-store.elereas.workers.dev'});
 store.flush=async()=>{};
+store.syncMenu=async()=>{};
 
 const source=JSON.parse(await readFile('public/data/catalog.json','utf8'));
 for(const catalog of source.shipments)store.inventory.importShipment({...catalog,status:'arrived',publishedAt:'2026-10-01'});
@@ -96,6 +97,8 @@ try{
   await page.waitForSelector('[data-product="MM0A3"]');
   assert.equal(await page.locator('[data-product]').count(),1);
   assert.equal(await page.locator('#product-search').count(),1);
+  assert(await page.locator('.category-heading').evaluate(el=>el.getBoundingClientRect().height)<110);
+  assert.equal(await page.locator('.arrow').count(),0);
 
   // Checkout has no manager selector.
   await page.locator('[data-step="1"][data-id="MM0A3"]').click();
@@ -179,6 +182,7 @@ try{
   await page.locator('#product-sort').selectOption('name');
   await page.locator('#phone-model').selectOption('iPhone 15');
   assert.equal(await page.locator('[data-product]').count(),1);
+  assert.equal(await page.locator('[data-enlarge="MM0A3"] img').evaluate(el=>getComputedStyle(el).backgroundColor),'rgba(0, 0, 0, 0)');
   await page.locator('[data-enlarge="MM0A3"]').click();await page.waitForSelector('#photo-dialog[open]');
   await page.waitForFunction(()=>document.querySelector('#photo-dialog>img')?.naturalWidth===1);
   await page.keyboard.press('Escape');await page.waitForSelector('#photo-dialog',{state:'hidden'});
@@ -234,6 +238,17 @@ try{
   await page.locator(`[data-cancel="${mixed.id}"]`).click();await page.locator('#confirm-action').click();
   await page.waitForSelector(`[data-cancel="${mixed.id}"]`,{state:'hidden'});
   assert.equal(store.inventory.orders({id:'123'}).some(o=>o.id===mixed.id),false);
+
+  // Admin diagnostics exposes a useful error and retries the existing queue.
+  store.checkNotifications=async()=>({...store.notificationStatus(),botUsername:'E_NewSletters_Bot',check:{ok:false,message:'Нет права публикации в канале.'}});
+  await page.locator('#admin-tab').click();await page.locator('#notification-settings').click();
+  await page.waitForSelector('#notification-details');
+  assert.match(await page.locator('#notification-details').textContent(),/Нет права публикации/);
+  store.flush=async()=>{store.inventory.sql.exec('UPDATE outbox SET sent=1 WHERE sent=0');};
+  await page.locator('#retry-notifications').click();
+  await page.waitForFunction(()=>document.querySelector('#retry-notifications')?.textContent==='Отправить ожидающие'&&document.querySelector('#retry-notifications')?.disabled);
+  assert.match(await page.locator('#notification-details').textContent(),/Ожидают отправки: 0/);
+  await page.locator('#close-dialog').click();
 
   assert.deepEqual(errors,[]);
   console.log('Browser checks passed: shared persistent cart, cross-brand order/edit/cancel, lost-response recovery, price/stock reconciliation, photo viewer, repeat order, sorting/model filters, responsive layout and Excel import.');

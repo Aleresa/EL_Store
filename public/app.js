@@ -125,11 +125,11 @@ function cards(){
   const list=BRANDS.map(brand=>({brand,catalog:catalogForBrand(brand.id)}));
   $('#shipment-grid').innerHTML=list.map(({brand,catalog})=>{
     const available=sellableProducts(catalog),examples=available.filter(p=>p.image||p.imageKey).slice(0,2);
-    return `<article class="brand-card"><button class="brand-open" data-brand="${esc(brand.id)}"><div class="brand-visual">${examples.map(p=>photo(p,'cover-photo')).join('')}<span class="brand-name">${esc(brand.name)}</span></div><div class="brand-card-footer"><span>${available.length} товаров</span><span class="arrow" aria-hidden="true">→</span></div></button></article>`;
+    return `<article class="brand-card"><button class="brand-open" data-brand="${esc(brand.id)}"><div class="brand-visual${examples.length?' has-photo':''}">${examples.map(p=>photo(p,'cover-photo')).join('')}<span class="brand-name">${esc(brand.name)}</span></div><div class="brand-card-footer"><span>${available.length} товаров</span></div></button></article>`;
   }).join('');
   document.querySelectorAll('[data-brand]').forEach(button=>button.onclick=()=>openShipment(button.dataset.brand));
   const results=$('#search-results');results.hidden=!query;
-  results.innerHTML=query?`${controls}<div class="section-header"><h2>Найдено товаров: ${matches.length}</h2></div>${matches.length?`<div class="search-products">${matches.slice(0,100).map(({brand,product:p},index)=>`<button class="search-product" data-search-result="${index}">${photo(p)}<span><small>${esc(brand.name)} · ${esc(p.group)} · ${esc(p.sku)}</small><strong>${esc(p.name)}</strong><span class="price">${money(p.price)}</span></span><span class="arrow" aria-hidden="true">→</span></button>`).join('')}</div>${matches.length>100?'<p class="fine-print">Показаны первые 100 товаров. Уточните запрос.</p>':''}`:'<p class="empty">Ничего не найдено. Попробуйте другое название, модель или артикул.</p>'}`:'';
+  results.innerHTML=query?`${controls}<div class="section-header"><h2>Найдено товаров: ${matches.length}</h2></div>${matches.length?`<div class="search-products">${matches.slice(0,100).map(({brand,product:p},index)=>`<button class="search-product" data-search-result="${index}">${photo(p)}<span><small>${esc(brand.name)} · ${esc(p.group)} · ${esc(p.sku)}</small><strong>${esc(p.name)}</strong><span class="price">${money(p.price)}</span></span></button>`).join('')}</div>${matches.length>100?'<p class="fine-print">Показаны первые 100 товаров. Уточните запрос.</p>':''}`:'<p class="empty">Ничего не найдено. Попробуйте другое название, модель или артикул.</p>'}`:'';
   bindSorting(cards);
   results.querySelectorAll('[data-search-result]').forEach(button=>button.onclick=()=>{
     const {brand,product}=matches[Number(button.dataset.searchResult)];
@@ -145,7 +145,7 @@ function renderDetail(){
   const categories=brand?.categories||[],visible=sellableProducts(s);
   if(!categories.some(name=>groupKey(name)===groupKey(state.productGroup)))state.productGroup='';
   if(!state.productGroup){
-    app.innerHTML=`<button class="back" id="back">← Бренды</button><section class="detail-head"><p class="eyebrow">КАТАЛОГ</p><h1>${esc(brand?.name||s.brand||s.title)}</h1><p class="subtitle">Выберите категорию.</p></section><div class="category-grid count-${categories.length}">${categories.map(name=>{const count=visible.filter(p=>groupKey(p.group)===groupKey(name)).length;return `<button class="category-card" data-category="${esc(name)}"><strong>${esc(name)}</strong><span>${count} товаров</span><span class="arrow" aria-hidden="true">→</span></button>`;}).join('')}</div>`;
+    app.innerHTML=`<button class="back" id="back">← Бренды</button><section class="detail-head"><p class="eyebrow">КАТАЛОГ</p><h1>${esc(brand?.name||s.brand||s.title)}</h1><p class="subtitle">Выберите категорию.</p></section><div class="category-grid count-${categories.length}">${categories.map(name=>{const count=visible.filter(p=>groupKey(p.group)===groupKey(name)).length;return `<button class="category-card" data-category="${esc(name)}"><strong>${esc(name)}</strong><span>${count} товаров</span></button>`;}).join('')}</div>`;
     $('#back').onclick=goBack;
     document.querySelectorAll('[data-category]').forEach(button=>button.onclick=()=>{state.productGroup=button.dataset.category;state.phoneModel='';render();window.scrollTo(0,0);});
     loadImages({...s,products:visible});
@@ -153,7 +153,7 @@ function renderDetail(){
   }
   const category=categories.find(name=>groupKey(name)===groupKey(state.productGroup))||state.productGroup;
   const count=visible.filter(p=>groupKey(p.group)===groupKey(category)).length;
-  app.innerHTML=`<button class="back" id="back">← ${esc(brand?.name||'Категории')}</button><section class="detail-head"><p class="eyebrow">${esc(brand?.name||s.brand||s.title)}</p><h1>${esc(category)}</h1><div class="detail-meta"><span>В продаже<strong>${count} позиций</strong></span></div></section><div class="toolbar"><input class="search" type="search" id="product-search" placeholder="Название, модель или артикул" aria-label="Поиск товара"></div>${sortingControls(visible.filter(p=>groupKey(p.group)===groupKey(category)))}<div id="products"></div>`;
+  app.innerHTML=`<button class="back" id="back">← ${esc(brand?.name||'Категории')}</button><section class="detail-head category-heading"><div class="category-heading-title"><p class="eyebrow">${esc(brand?.name||s.brand||s.title)}</p><h1>${esc(category)}</h1></div><div class="detail-meta"><span>В продаже<strong>${count} позиций</strong></span></div></section><div class="toolbar"><input class="search" type="search" id="product-search" placeholder="Название, модель или артикул" aria-label="Поиск товара"></div>${sortingControls(visible.filter(p=>groupKey(p.group)===groupKey(category)))}<div id="products"></div>`;
   $('#product-search').oninput=debounce(e=>{if(e.target.isConnected)products(e.target.value);});
   bindSorting(()=>products($('#product-search').value));
   $('#back').onclick=goBack;products('');loadImages({...s,products:visible.filter(p=>groupKey(p.group)===groupKey(category))});
@@ -185,7 +185,7 @@ function totals(){return Object.values(state.cart).reduce((r,l)=>({count:r.count
 function cartBar(){
   const t=totals(),visible=t.count>0||Boolean(state.pendingOrder);
   $('#cart-bar').hidden=!visible;document.body.classList.toggle('has-cart',visible);
-  if(visible){$('#cart-bar').innerHTML=`<button id="open-cart"><span>В корзине: ${t.count} шт.<br><small>${state.pendingOrder?'Проверить отправку':'Проверить заказ'}</small></span><strong>${money(t.total)} →</strong></button>`;$('#open-cart').onclick=showCart;}
+  if(visible){$('#cart-bar').innerHTML=`<button id="open-cart"><span>В корзине: ${t.count} шт.<br><small>${state.pendingOrder?'Проверить отправку':'Проверить заказ'}</small></span><strong>${money(t.total)}</strong></button>`;$('#open-cart').onclick=showCart;}
 }
 function closeDialog(){importController?.abort();dialog.close();}
 function showDialog(title,body){dialog.innerHTML=`<div class="dialog-header"><h2>${esc(title)}</h2><button class="icon-button" id="close-dialog" aria-label="Закрыть">×</button></div>${body}`;$('#close-dialog').onclick=closeDialog;if(!dialog.open)dialog.showModal();}
@@ -300,10 +300,35 @@ function changeOrder(id,status,all){
 }
 function renderAdmin(){
   if(!state.admin){state.view='shipments';render();return;}
-  app.innerHTML=`<div class="page-heading"><div><p class="eyebrow">EL / STORE</p><h1>Управление</h1><p class="subtitle">Excel обновляет цены и текущие остатки по артикулу. Товары, которых нет в новом файле, скрываются автоматически.</p></div></div><div class="actions"><button class="secondary" id="all-orders">Все заказы</button><button class="secondary" id="setup-bot">Подключить бота</button></div><section class="admin-panel">${BRANDS.map(brand=>{const catalog=catalogForBrand(brand.id),available=sellableProducts(catalog);return `<div class="admin-row"><div><strong>${esc(brand.name)}</strong><small>${brand.categories.map(esc).join(' · ')}</small><small>${available.length} товаров в продаже${catalog?' · каталог загружен':' · Excel ещё не загружен'}</small></div><button class="primary" data-brand-import="${esc(brand.id)}">${catalog?'Обновить Excel':'Загрузить Excel'}</button></div>`;}).join('')}</section>`;
+  app.innerHTML=`<div class="page-heading"><div><p class="eyebrow">EL / STORE</p><h1>Управление</h1><p class="subtitle">Excel обновляет цены и текущие остатки по артикулу. Товары, которых нет в новом файле, скрываются автоматически.</p></div></div><div class="actions"><button class="secondary" id="all-orders">Все заказы</button><button class="secondary" id="setup-bot">Подключить бота</button><button class="secondary" id="notification-settings">Уведомления в канал</button></div><section class="admin-panel">${BRANDS.map(brand=>{const catalog=catalogForBrand(brand.id),available=sellableProducts(catalog);return `<div class="admin-row"><div><strong>${esc(brand.name)}</strong><small>${brand.categories.map(esc).join(' · ')}</small><small>${available.length} товаров в продаже${catalog?' · каталог загружен':' · Excel ещё не загружен'}</small></div><button class="primary" data-brand-import="${esc(brand.id)}">${catalog?'Обновить Excel':'Загрузить Excel'}</button></div>`;}).join('')}</section>`;
   $('#all-orders').onclick=()=>{state.view='all-orders';render();};
   $('#setup-bot').onclick=showBotSetup;
+  $('#notification-settings').onclick=showNotifications;
   document.querySelectorAll('[data-brand-import]').forEach(b=>{const brand=brandById(b.dataset.brandImport);b.onclick=()=>editShipment(catalogForBrand(brand.id),brand);});
+}
+async function showNotifications(){
+  showDialog('Уведомления в канал','<p id="notifications-status" class="muted">Проверяем подключение…</p>');
+  const container=$('#notifications-status');
+  try{
+    const data=await api('/admin/notifications/check','POST',{});
+    if(!container.isConnected)return;
+    drawNotifications(data);
+  }catch(e){if(container.isConnected)container.innerHTML=`<span class="error">${esc(e.message)}</span>`;}
+}
+function drawNotifications(data){
+  showDialog('Уведомления в канал',`<div id="notification-details"><p><strong>Канал:</strong> ${esc(data.channel?.title||data.target||'не задан')}</p><p><strong>Бот:</strong> @${esc(data.botUsername||'E_NewSletters_Bot')}</p><p><strong>Ожидают отправки:</strong> ${data.pending}</p>${data.check?`<p class="${data.check.ok?'import-summary':'warning'}">${esc(data.check.message)}</p>`:''}${data.lastError?`<div class="warning"><strong>Последняя ошибка отправки</strong><p>${esc(data.lastError.message)}</p><small>${esc(data.lastError.description||'')}</small></div>`:''}${data.lastSuccess?`<p class="fine-print">Последняя успешная отправка: ${esc(new Date(data.lastSuccess).toLocaleString('ru-RU'))}</p>`:''}<p class="fine-print">Повторная отправка обрабатывает сохранённые заказы. Уже доставленные сообщения обновляются.</p></div><p class="error" id="notifications-error" role="alert"></p><div class="actions"><button class="primary" id="retry-notifications" ${!data.configured||!data.pending?'disabled':''}>Отправить ожидающие</button><button class="secondary" id="recheck-notifications">Проверить снова</button></div>`);
+  $('#recheck-notifications').onclick=showNotifications;
+  $('#retry-notifications').onclick=async()=>{
+    const button=$('#retry-notifications');button.disabled=true;button.textContent='Отправляем…';
+    try{
+      await api('/admin/notifications/retry','POST',{});
+      for(let attempt=0;attempt<4;attempt++){
+        await new Promise(resolve=>setTimeout(resolve,1500));if(!button.isConnected)return;
+        const next=await api('/admin/notifications');
+        if(!next.pending||attempt===3){drawNotifications({...data,...next});return;}
+      }
+    }catch(e){if(button.isConnected){$('#notifications-error').textContent=e.message;button.disabled=false;button.textContent='Повторить отправку';}}
+  };
 }
 function deleteShipment(shipment){
   showDialog('Удалить каталог?',`<p><strong>${esc(shipment.title)}</strong></p><p>Каталог и его товары исчезнут из приложения. Отменённые заказы останутся в истории администратора. Каталог с действующими заказами удалить нельзя.</p><p id="delete-error" class="error" role="alert"></p><button class="danger full" id="delete-shipment">Удалить каталог</button>`);

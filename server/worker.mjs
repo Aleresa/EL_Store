@@ -9,8 +9,8 @@ async function readJson(request) {
   if(body.length>15000000) throw new ApiError(413,'Файл слишком большой.');
   try { const value=JSON.parse(body); if(!value || typeof value !== 'object' || Array.isArray(value)) throw Error(); return value; } catch { throw new ApiError(400,'Некорректный JSON.'); }
 }
-async function telegram(env,method,body) {
-  const response=await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/${method}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:AbortSignal.timeout(15000)});
+async function telegram(env,method,body,timeout=15000) {
+  const response=await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/${method}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:AbortSignal.timeout(timeout)});
   const result=await response.json();
   if(!response.ok || !result.ok) { const error=new Error('Telegram request failed');error.telegramCode=result.error_code;error.telegramDescription=result.description||'';throw error; }
   return result.result;
@@ -46,7 +46,22 @@ export class NewsletterStore {
       if(path==='/telegram/webhook') return await this.webhook(request);
       const user=await authenticate(request.headers.get('X-Telegram-Init-Data'),this.env.BOT_TOKEN);
       const admin=isAdmin(user,this.env);
-      if(path==='/api/me' && request.method==='GET') return json({user,admin});
+      if(path==='/api/me' && request.method==='GET') {
+        this.ctx.waitUntil(this.syncMenu(user.id).catch(()=>console.warn('Telegram menu update pending')));
+        // Recover an unsent queue even if an older deployment left it without an alarm.
+        if(this.inventory.one('SELECT id FROM outbox WHERE sent=0 LIMIT 1'))this.ctx.waitUntil(this.ensureAlarm().then(()=>this.flush()));
+        return json({user,admin});
+      }
+      if(path.startsWith('/api/admin/notifications')) {
+        if(!admin)throw new ApiError(403,'Раздел доступен только владельцу.');
+        if(path==='/api/admin/notifications'&&request.method==='GET')return json(this.notificationStatus());
+        if(path==='/api/admin/notifications/check'&&request.method==='POST'){
+          await readJson(request);return json(await this.checkNotifications());
+        }
+        if(path==='/api/admin/notifications/retry'&&request.method==='POST'){
+          await readJson(request);await this.ensureAlarm();this.ctx.waitUntil(this.flush());return json(this.notificationStatus());
+        }
+      }
       if(path==='/api/admin/setup-bot' && request.method==='POST') {
         if(!admin) throw new ApiError(403,'Раздел доступен только владельцу.');
         await readJson(request);
@@ -101,7 +116,7 @@ export class NewsletterStore {
     try {
       await telegramWithDnsRetry(this.env,'setWebhook',{url:appUrl+'/telegram/webhook',secret_token:secret,allowed_updates:['message']});
       await Promise.all([
-        telegram(this.env,'setChatMenuButton',{menu_button:{type:'web_app',text:'Товары',web_app:{url:appUrl}}}),
+        telegram(this.env,'setChatMenuButton',{menu_button:{type:'web_app',text:'Сделать Заказ',web_app:{url:appUrl}}}),
         telegram(this.env,'setMyCommands',{commands:[{command:'start',description:'Открыть товары'},{command:'id',description:'Узнать свой Telegram ID'},{command:'admin',description:'Управление магазином'}]})
       ]);
     } catch(error) {
@@ -109,6 +124,49 @@ export class NewsletterStore {
       throw new ApiError(502,detail?`Telegram: ${detail}`:'Не удалось завершить настройку бота. Проверьте настройки Telegram и повторите подключение.');
     }
     return {ok:true,webhookUrl:appUrl+'/telegram/webhook'};
+  }
+  setting(key) {return this.inventory.one('SELECT value FROM bot_settings WHERE key=?',key)?.value;}
+  setSetting(key,value) {this.inventory.sql.exec('INSERT INTO bot_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',key,value);}
+  async syncMenu(chatId) {
+    const appUrl=String(this.env.MINI_APP_URL||'https://el-store.elereas.workers.dev').replace(/\/$/,'');
+    const menu={type:'web_app',text:'Сделать Заказ',web_app:{url:appUrl}};
+    const version=JSON.stringify(menu);
+    // A chat-specific button overrides Telegram's global button, so update both.
+    for(const target of [null,chatId]){
+      const key='menu:'+(target??'default');if(this.setting(key)===version)continue;
+      await telegram(this.env,'setChatMenuButton',{...(target?{chat_id:target}:{}),menu_button:menu});
+      this.setSetting(key,version);
+    }
+  }
+  notificationTarget() {return String(this.env.ORDER_CHAT_ID||'').trim();}
+  notificationError(error) {
+    let description=String(error.telegramDescription||error.message||'').slice(0,500);
+    if(this.env.BOT_TOKEN)description=description.replaceAll(this.env.BOT_TOKEN,'[скрыто]');
+    let message='Не удалось связаться с Telegram. Заказ сохранён, отправка будет повторена.';
+    if(/chat not found/i.test(description))message='Telegram не находит канал. Проверьте ORDER_CHAT_ID и добавьте бота администратором этого канала.';
+    else if(/not enough rights|CHAT_WRITE_FORBIDDEN|need administrator|not a member|kicked|bot is not a member|have no rights/i.test(description))message='У бота нет доступа к публикации. Добавьте его администратором канала и включите право «Публикация сообщений».';
+    else if(error.telegramCode===401||/unauthorized/i.test(description))message='Telegram отклонил токен бота. Проверьте BOT_TOKEN в настройках приложения.';
+    else if(error.telegramCode===429)message='Telegram временно ограничил частоту отправки. Заказы сохранены и будут отправлены повторно.';
+    else if(error.telegramCode===403)message='Telegram запретил отправку. Проверьте, что бот добавлен в нужный канал и имеет право публикации.';
+    else if(error.telegramCode)message='Telegram отклонил уведомление. Причина указана ниже; заказ сохранён.';
+    return {message,description,code:error.telegramCode||null,at:new Date().toISOString()};
+  }
+  notificationStatus() {
+    const saved=this.setting('notification_error');
+    return {configured:Boolean(this.env.BOT_TOKEN&&this.notificationTarget()),target:this.notificationTarget(),botUsername:this.env.BOT_USERNAME,
+      pending:this.inventory.one('SELECT COUNT(*) AS count FROM outbox WHERE sent=0').count,
+      lastError:saved?JSON.parse(saved):null,lastSuccess:this.setting('notification_success')||null};
+  }
+  async checkNotifications() {
+    const status=this.notificationStatus(),target=status.target;
+    if(!status.configured)return {...status,check:{ok:false,message:'Укажите BOT_TOKEN и ORDER_CHAT_ID в настройках приложения.'}};
+    if(!/^(?:-?\d+|@[A-Za-z0-9_]{5,})$/.test(target))return {...status,check:{ok:false,message:'В ORDER_CHAT_ID должен быть один ID канала (обычно -100…) или @имя канала. Пригласительная ссылка t.me/+… не подходит.'}};
+    try{
+      const bot=await telegram(this.env,'getMe',{},7000);
+      const [channel,member]=await Promise.all([telegram(this.env,'getChat',{chat_id:target},7000),telegram(this.env,'getChatMember',{chat_id:target,user_id:bot.id},7000)]);
+      const allowed=channel.type==='channel'?(member.status==='creator'||member.status==='administrator'&&member.can_post_messages===true):!['left','kicked'].includes(member.status)&&member.can_send_messages!==false;
+      return {...status,botUsername:bot.username,channel:{id:channel.id,title:channel.title||channel.username,type:channel.type},check:{ok:allowed,message:allowed?'Канал доступен, у бота есть право публикации.':`У @${bot.username} нет права публикации в этом канале. Откройте администраторов канала и включите «Публикация сообщений».`}};
+    }catch(error){const detail=this.notificationError(error);return {...status,check:{ok:false,message:detail.message+(detail.description?' '+detail.description:'')}};}
   }
   async ensureAlarm() { if(!(await this.ctx.storage.getAlarm())) await this.ctx.storage.setAlarm(Date.now()+30000); }
   async flush() {
@@ -121,8 +179,13 @@ export class NewsletterStore {
         const data=JSON.parse(row.data),id=data.orderId||row.id.split(':')[0];
         if(!await this.syncOrderMessage(id,budget))break;
         this.inventory.sql.exec('UPDATE outbox SET sent=1 WHERE id=?',row.id);
+        this.setSetting('notification_success',new Date().toISOString());
       }
-    } catch { console.warn('Notification pending; scheduled retry'); }
+      if(!this.inventory.one('SELECT id FROM outbox WHERE sent=0 LIMIT 1'))this.inventory.sql.exec("DELETE FROM bot_settings WHERE key='notification_error'");
+    } catch(error) {
+      const detail=this.notificationError(error);this.setSetting('notification_error',JSON.stringify(detail));
+      console.warn('Notification pending:',detail.code,detail.description);
+    }
     finally {
       this.flushing=false;
       if(this.inventory.one('SELECT id FROM outbox WHERE sent=0 LIMIT 1')) await this.ensureAlarm();
@@ -131,7 +194,7 @@ export class NewsletterStore {
   async syncOrderMessage(id,budget) {
     const row=this.inventory.one('SELECT data,status FROM orders WHERE id=?',id);
     if(!row)throw new Error('Order notification missing');
-    const data={...JSON.parse(row.data),status:row.status},target=String(this.env.ORDER_CHAT_ID);
+    const data={...JSON.parse(row.data),status:row.status},target=this.notificationTarget();
     const text=this.inventory.notificationText(data),chunks=[];
     let chunk='';for(const char of text){if(chunk.length+char.length>3000){chunks.push(chunk);chunk='';}chunk+=char;}if(chunk)chunks.push(chunk);
     const previous=this.inventory.rows('SELECT * FROM order_messages WHERE order_id=? AND target=? ORDER BY part',id,target);
@@ -185,7 +248,7 @@ export class NewsletterStore {
       if(command==='/admin' && admin) text='Откройте приложение → Управление. Здесь можно обновить каталоги Apple и Remax из Excel и обработать заказы.';
       if(message.forward_origin?.type==='channel' && admin) text=`ID канала: ${message.forward_origin.chat.id}\nДобавьте бота администратором с правом публикации, затем укажите этот ID в ORDER_CHAT_ID.`;
       if(message.document && admin) text='Для обновления каталога откройте приложение → Управление → нужный бренд → Загрузить/Обновить Excel.';
-      if(text) await telegram(this.env,'sendMessage',{chat_id:message.chat.id,text,reply_markup:{inline_keyboard:[[{text:'Открыть товары',url:this.env.MINI_APP_URL || 'https://el-store.elereas.workers.dev'}]]}});
+      if(text) await telegram(this.env,'sendMessage',{chat_id:message.chat.id,text,reply_markup:{inline_keyboard:[[{text:'Сделать Заказ',url:this.env.MINI_APP_URL || 'https://el-store.elereas.workers.dev'}]]}});
     }
     this.inventory.sql.exec('INSERT OR IGNORE INTO bot_updates(id) VALUES(?)',update.update_id);
     this.inventory.sql.exec('DELETE FROM bot_updates WHERE id < ?',update.update_id-10000);
