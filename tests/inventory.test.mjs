@@ -311,3 +311,39 @@ test('menu update changes global and private-chat buttons without touching the w
   assert.equal(calls.length,2);assert(calls.every(c=>c.method==='setChatMenuButton'&&c.body.menu_button.text==='Сделать Заказ'));
   assert.equal(calls[1].body.chat_id,'123');
 });
+
+test('invalid saved Telegram message ID is replaced and the rest of the notification queue drains',async t=>{
+  const {store}=notificationFixture(),calls=[];let nextMessageId=200;
+  const orders=Array.from({length:7},(_,i)=>store.inventory.placeOrder(user,request('stale-message-'+i,1)));
+  store.inventory.sql.exec('INSERT INTO order_messages(order_id,target,part,message_id,text) VALUES(?,?,?,?,?)',orders[0].id,'-100123',0,77,'Previous order text');
+  t.mock.method(globalThis,'fetch',async(url,options)=>{
+    const method=new URL(url).pathname.split('/').pop(),body=JSON.parse(options.body);calls.push({method,body});
+    if(method==='editMessageText'&&body.message_id===77)return Response.json({ok:false,error_code:400,description:'Bad Request: MESSAGE_ID_INVALID'},{status:400});
+    return Response.json({ok:true,result:{message_id:method==='sendMessage'?++nextMessageId:body.message_id}});
+  });
+  await store.flush();
+  assert.equal(store.notificationStatus().pending,0);
+  assert.equal(store.notificationStatus().lastError,null);
+  assert.equal(calls.filter(c=>c.method==='sendMessage').length,7);
+  const replacement=store.inventory.one('SELECT message_id FROM order_messages WHERE order_id=?',orders[0].id).message_id;
+  assert.equal(replacement,201);
+  const sentCount=calls.length;await store.flush();assert.equal(calls.length,sentCount);
+  store.inventory.editOrder(user,orders[0].id,editInput(orders[0],[{id:'p1',quantity:1}],{comment:'Обновлённый заказ'}));
+  await store.flush();
+  assert.equal(calls.at(-1).method,'editMessageText');assert.equal(calls.at(-1).body.message_id,replacement);
+  assert.equal(calls.filter(c=>c.method==='sendMessage').length,7);
+});
+
+test('failed replacement delivery retains the queued order for a later retry',async t=>{
+  const {store,alarm}=notificationFixture();let available=false;
+  const order=store.inventory.placeOrder(user,request('replacement-retry',1));
+  store.inventory.sql.exec('INSERT INTO order_messages(order_id,target,part,message_id,text) VALUES(?,?,?,?,?)',order.id,'-100123',0,77,'Previous order text');
+  t.mock.method(globalThis,'fetch',async(url)=>{
+    if(new URL(url).pathname.endsWith('/editMessageText'))return Response.json({ok:false,error_code:400,description:'Bad Request: MESSAGE_ID_INVALID'},{status:400});
+    return available?Response.json({ok:true,result:{message_id:202}}):Response.json({ok:false,error_code:503,description:'Service Unavailable'},{status:503});
+  });
+  await store.flush();assert.equal(store.notificationStatus().pending,1);assert(alarm());
+  assert.equal(store.notificationStatus().lastError.code,503);
+  available=true;await store.flush();assert.equal(store.notificationStatus().pending,0);
+  assert.equal(store.inventory.one('SELECT message_id FROM order_messages WHERE order_id=?',order.id).message_id,202);
+});

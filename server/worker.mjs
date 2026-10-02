@@ -211,7 +211,9 @@ export class NewsletterStore {
         catch(error){
           const description=error.telegramDescription||'';
           if(error.telegramCode===400 && /message is not modified/i.test(description)) { /* A previous edit succeeded before a lost response. */ }
-          else if(error.telegramCode===400 && /message to edit not found|message can't be edited|message can not be edited/i.test(description))messageId=null;
+          // Telegram also uses MESSAGE_ID_INVALID when the saved message cannot be edited.
+          // Replace it, then persist the new ID only after sendMessage succeeds.
+          else if(error.telegramCode===400 && /\bMESSAGE_ID_INVALID\b|message to edit not found|message can't be edited|message can not be edited/i.test(description))messageId=null;
           else throw error;
         }
       }
