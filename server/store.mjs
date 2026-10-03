@@ -98,6 +98,8 @@ export class Inventory {
     if(input.publishBrand!==undefined&&typeof input.publishBrand!=='boolean')throw new ApiError(400,'Некорректная видимость бренда.');
     if (!validId(input.id) || !trim(input.title,160) || !STATUSES.has(input.status) || !Array.isArray(input.products) || !input.products.length || input.products.length>3000) throw new ApiError(400,'Проверьте название, статус и список товаров.');
     for (const d of [input.eta,input.publishedAt]) if (d != null && d !== '' && (!/^\d{4}-\d{2}-\d{2}$/.test(d) || !Number.isFinite(Date.parse(d)) || new Date(d).toISOString().slice(0,10)!==d)) throw new ApiError(400,'Некорректная дата.');
+    const importCategory=input.importCategory===undefined?null:brand.categories.find(name=>typeof input.importCategory==='string'&&groupKey(name)===groupKey(input.importCategory));
+    if(input.importCategory!==undefined&&(!importCategory||input.stockMode!=='live'))throw new ApiError(400,'Выберите существующую категорию для загрузки Excel.');
     const old = this.one('SELECT data FROM shipments WHERE id=?',input.id);
     const previous = old ? JSON.parse(old.data) : null;
     if(input.groupingMode!==undefined&&input.groupingMode!=='manual')throw new ApiError(400,'Некорректный режим групп.');
@@ -116,7 +118,7 @@ export class Inventory {
       if (p.image?.length>180000) throw new ApiError(400,`${p.sku||p.id}: фотография слишком большая. Обновите приложение и загрузите Excel заново для сжатия.`);
       if (p.imageKey && !/^[a-zA-Z0-9_-]+\/[a-zA-Z0-9_-]+$/.test(p.imageKey)) throw new ApiError(400,'Некорректное изображение.');
       if(input.groupingMode==='manual'&&p.group!==undefined&&(typeof p.group!=='string'||p.group.length>80))throw new ApiError(400,'Некорректная группа товара.');
-      const group=input.groupingMode==='manual'?trim(p.group,80):'';
+      const group=importCategory||(input.groupingMode==='manual'?trim(p.group,80):'');
       const groupName=groupNames.find(g=>groupKey(g)===groupKey(group));
       if(fixedCategories&&!groupName)throw new ApiError(400,`${p.sku||p.id}: выберите категорию товара.`);
       if(group&&!groupName)throw new ApiError(400,'Выберите существующую категорию товара.');
@@ -126,13 +128,18 @@ export class Inventory {
       if(shipment.stockMode==='live') {
         const current=this.rows('SELECT id,placed,total,data FROM products WHERE shipment=?',shipment.id);
         const byId=new Map(current.map(p=>[p.id,p]));
+        if(importCategory){
+          for(const p of products){const row=byId.get(p.id);if(row&&groupKey(JSON.parse(row.data).group)!==groupKey(importCategory))throw new ApiError(409,`${p.sku}: артикул уже используется в другой категории. Укажите отдельный артикул для этого товара.`);}
+          if(previous)Object.assign(shipment,previous,{groups:brand.categories,title:brand.name,brand:brand.name});
+        }
+
         this.sql.exec('INSERT INTO shipments(id,data) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data',shipment.id,JSON.stringify(shipment));
         for(const p of products) {
           const existing=byId.get(p.id),placed=existing?.placed||0,total=p.stock+placed;
           const stored={...p,addedAt:existing?(JSON.parse(existing.data).addedAt||previous?.publishedAt||'1970-01-01'):new Date().toISOString(),hidden:false};
           this.sql.exec('INSERT INTO products(shipment,id,data,total) VALUES(?,?,?,?) ON CONFLICT(shipment,id) DO UPDATE SET data=excluded.data,total=excluded.total',shipment.id,p.id,JSON.stringify(stored),total);
         }
-        for(const row of current) if(!ids.has(row.id)) {
+        for(const row of current) if(!ids.has(row.id)&&(!importCategory||groupKey(JSON.parse(row.data).group)===groupKey(importCategory))) {
           const previous=JSON.parse(row.data);
           const hidden={...previous,hidden:true,stock:0};
           this.sql.exec('UPDATE products SET data=?,total=? WHERE shipment=? AND id=?',JSON.stringify(hidden),row.placed,shipment.id,row.id);

@@ -398,3 +398,26 @@ test('creating and changing brands requires administrator authentication',async(
   }
   assert.equal(store.inventory.brands(true).length,2);
 });
+
+test('category import preserves other categories and their reserved stock',()=>{
+  const {inv,catalog,sql}=fixture();
+  const order=inv.placeOrder(user,request('category-order',3));
+  const original=sql.exec('SELECT * FROM products WHERE shipment=? AND id=?','apple','p1')[0];
+  inv.importShipment({...catalog,importCategory:'Копия',products:[{id:'copy-new',sku:'COPY-NEW',name:'Новая копия',stock:5,price:10000}]});
+  assert.deepEqual(sql.exec('SELECT * FROM products WHERE shipment=? AND id=?','apple','p1')[0],original);
+  const products=inv.catalog()[0].products;
+  assert.equal(products.find(p=>p.id==='p1').stock,7);
+  assert.equal(products.find(p=>p.id==='copy-new').group,'Копия');
+  assert.equal(products.some(p=>p.id==='p2'),false);
+  inv.importShipment({...catalog,importCategory:'Оригинал',products:[{...catalog.products[0],stock:4}]});
+  assert.equal(inv.catalog()[0].products.find(p=>p.id==='copy-new').stock,5);
+  inv.changeOrder(user,order.id,'cancelled');
+  assert.equal(inv.catalog()[0].products.find(p=>p.id==='p1').stock,7);
+});
+
+test('category import rejects unknown categories and cross-category ID collisions atomically',()=>{
+  const {inv,catalog}=fixture(),before=inv.catalog(true);
+  assert.throws(()=>inv.importShipment({...catalog,importCategory:'Неизвестная'}),/категорию/);
+  assert.throws(()=>inv.importShipment({...catalog,importCategory:'Копия',products:[catalog.products[0]]}),/другой категории/);
+  assert.deepEqual(inv.catalog(true),before);
+});

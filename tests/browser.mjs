@@ -314,6 +314,20 @@ try{
   assert.match(fallbackImage.image,/^data:image\/jpeg;base64,/);assert.ok(fallbackImage.image.length<=180000);
   store.inventory.importShipment({id:customBrand.id,title:'Baseus Pro',status:'arrived',stockMode:'live',groupingMode:'manual',products:[{id:'image-check',name:'Photo',price:100,stock:1,group:'Кабели',image:fallbackImage.image}]});
 
+  await page.locator('#admin-tab').click();
+  await page.locator('[data-brand-import="apple"]').click();
+  await page.locator('#import-category').selectOption('Копия');
+  const originalsBefore=store.inventory.catalog(true).find(s=>s.id==='apple').products.filter(p=>p.group==='Оригинал');
+  await page.locator('#xlsx-file').setInputFiles({name:'copies.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:await supplierXlsx([['Наименование','Код','Доступно','Цена продажи'],['Кабель копия','COPY-NEW','8','100']])});
+  await page.waitForFunction(()=>!document.querySelector('#save-shipment').disabled);
+  assert.equal(await page.locator('[data-product-category]').inputValue(),'Копия');
+  assert.equal(await page.locator('[data-product-category]').isDisabled(),true);
+  if(await page.locator('#accept-warnings').count())await page.locator('#accept-warnings').check();
+  await page.locator('#save-shipment').click();await page.waitForSelector('#shipment-form',{state:'hidden'});
+  const appleAfter=store.inventory.catalog(true).find(s=>s.id==='apple');
+  assert.deepEqual(appleAfter.products.filter(p=>p.group==='Оригинал'),originalsBefore);
+  assert.equal(appleAfter.products.find(p=>p.sku==='COPY-NEW').group,'Копия');
+
   assert.deepEqual(errors,[]);
   console.log('Browser checks passed: shared persistent cart, cross-brand order/edit/cancel, lost-response recovery, price/stock reconciliation, photo viewer, repeat order, sorting/model filters, responsive layout and Excel import.');
 }finally{

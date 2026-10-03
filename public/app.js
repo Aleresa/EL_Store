@@ -397,15 +397,23 @@ function editShipment(existing,brand){
   brand ||= brandById(existing?.id);
   if(!brand){toast('Не удалось определить бренд.');return;}
   const groups=[...brand.categories],historyProducts=existing?.products||[];
+  let importCategory='';
   let products=existing?manualProducts(existing.products.filter(p=>!p.hidden&&p.stock>0).map(p=>({...p,stock:p.stock})),groups):null,warnings=[];
-  showDialog(`${brand.name} — каталог`,`<form id="shipment-form"><p class="fine-print">Загрузите актуальный Excel. Совпадение идёт по артикулу: цена и остаток обновятся, отсутствующие в новом файле товары будут скрыты.</p><p class="fine-print"><strong>Категории:</strong> ${groups.map(esc).join(' · ')}</p><label class="field">${existing?'Обновить каталог из Excel':'Excel с товарами'}<input type="file" id="xlsx-file" accept=".xls,.xlsx" ${existing?'':'required'}></label><div id="import-info">${products?`<p class="import-summary">Сейчас в продаже: ${products.length} позиций</p>`:''}</div><div id="category-editor"></div><label class="field checkbox-field"><input id="publish-brand" type="checkbox" ${!existing||!brand.hidden?'checked':''}> Показывать бренд покупателям после сохранения</label><p id="import-error" class="error" role="alert"></p><button class="primary full" id="save-shipment" type="submit" ${products?'':'disabled'}>Сохранить каталог</button></form>`);
+  showDialog(`${brand.name} — каталог`,`<form id="shipment-form"><p class="fine-print">Выберите категорию перед загрузкой Excel. Обновятся только её товары; остальные категории сохранятся. Отсутствующие в файле товары выбранной категории будут скрыты.</p><p class="fine-print"><strong>Категории:</strong> ${groups.map(esc).join(' · ')}</p><label class="field">Куда загрузить Excel<select id="import-category"><option value="">Весь бренд — обновить все категории</option>${groups.map(name=>`<option value="${esc(name)}">${esc(name)}</option>`).join('')}</select></label><label class="field">${existing?'Обновить каталог из Excel':'Excel с товарами'}<input type="file" id="xlsx-file" accept=".xls,.xlsx" ${existing?'':'required'}></label><div id="import-info">${products?`<p class="import-summary">Сейчас в продаже: ${products.length} позиций</p>`:''}</div><div id="category-editor"></div><label class="field checkbox-field"><input id="publish-brand" type="checkbox" ${!existing||!brand.hidden?'checked':''}> Показывать бренд покупателям после сохранения</label><p id="import-error" class="error" role="alert"></p><button class="primary full" id="save-shipment" type="submit" ${products?'':'disabled'}>Сохранить каталог</button></form>`);
   const form=$('#shipment-form');
   function reviewCategories(){
     const container=$('#category-editor');if(!products){container.textContent='';return;}
-    container.innerHTML=`<section class="category-review"><h3>Распределение по категориям</h3><p class="fine-print">Для каждого товара выберите одну из категорий ${esc(brand.name)}.</p><div class="category-editor-products">${products.map(p=>`<label class="category-editor-product"><span><strong>${esc(p.name)}</strong><small>${esc(p.sku)}</small></span><select data-product-category="${esc(p.id)}" required><option value="">Не выбрано</option>${groups.map(name=>`<option value="${esc(name)}" ${groupKey(p.group)===groupKey(name)?'selected':''}>${esc(name)}</option>`).join('')}</select></label>`).join('')}</div></section>`;
+    container.innerHTML=`<section class="category-review"><h3>Распределение по категориям</h3><p class="fine-print">${importCategory?`Все товары будут загружены в категорию «${esc(importCategory)}».`:`Для каждого товара выберите одну из категорий ${esc(brand.name)}.`}</p><div class="category-editor-products">${products.map(p=>`<label class="category-editor-product"><span><strong>${esc(p.name)}</strong><small>${esc(p.sku)}</small></span><select data-product-category="${esc(p.id)}" ${importCategory?'disabled':''} required><option value="">Не выбрано</option>${groups.map(name=>`<option value="${esc(name)}" ${groupKey(p.group)===groupKey(name)?'selected':''}>${esc(name)}</option>`).join('')}</select></label>`).join('')}</div></section>`;
     container.querySelectorAll('[data-product-category]').forEach(select=>select.onchange=()=>{const p=products.find(x=>x.id===select.dataset.productCategory);if(p)p.group=select.value;});
   }
   if(products)reviewCategories();
+  $('#import-category').onchange=()=>{
+    importController?.abort();importCategory=$('#import-category').value;
+    products=null;warnings=[];$('#xlsx-file').value='';$('#xlsx-file').required=true;
+    $('#category-editor').textContent='';$('#import-error').textContent='';$('#save-shipment').disabled=true;
+    $('#import-info').textContent=importCategory?`Загрузите Excel для категории «${importCategory}». Остальные категории не изменятся.`:'Excel обновит все категории бренда. Отсутствующие товары будут скрыты.';
+  };
+
   $('#xlsx-file').onchange=async e=>{
     const file=e.target.files[0];if(!file)return;
     importController?.abort();const controller=new AbortController();importController=controller;
@@ -416,8 +424,8 @@ function editShipment(existing,brand){
       if(controller.signal.aborted||!form.isConnected)return;
       const previousById=new Map(historyProducts.map(p=>[p.id,p]));
       const merged=result.products.map(p=>{const old=previousById.get(p.id);return {...p,group:old?.group||'',image:p.image||old?.image||null,imageKey:p.imageKey||old?.imageKey||null};});
-      products=manualProducts(merged,groups,historyProducts);warnings=result.warnings;reviewCategories();
-      const previousIds=new Set(historyProducts.filter(p=>!p.hidden).map(p=>p.id)),nextIds=new Set(products.map(p=>p.id));
+      products=importCategory?merged.map(p=>({...p,group:importCategory})):manualProducts(merged,groups,historyProducts);warnings=result.warnings;reviewCategories();
+      const previousIds=new Set(historyProducts.filter(p=>!p.hidden&&(!importCategory||groupKey(p.group)===groupKey(importCategory))).map(p=>p.id)),nextIds=new Set(products.map(p=>p.id));
       const hidden=[...previousIds].filter(id=>!nextIds.has(id)).length;
       $('#import-info').innerHTML=`<div class="import-summary">${products.length} позиций · ${products.filter(p=>p.image||p.imageKey).length} фотографий${hidden?` · будет скрыто: ${hidden}`:''}</div>${warnings.length?`<details class="warning"><summary>Замечания: ${warnings.length}</summary>${warnings.map(w=>`<div>${esc(w)}</div>`).join('')}</details><label class="field"><input id="accept-warnings" type="checkbox" style="width:auto;min-height:auto"> Проверил замечания</label>`:''}<div class="import-preview"><table><thead><tr><th>Товар</th><th>Остаток</th><th>Цена</th></tr></thead><tbody>${products.map(p=>`<tr><td>${esc(p.name)}<br>${esc(p.sku)}</td><td>${p.stock}</td><td>${p.price===null?`<input data-import-price="${esc(p.id)}" type="number" inputmode="decimal" required min="0" max="1000000" step="0.01" placeholder="Цена, ₽" aria-label="Цена ${esc(p.sku)}">`:money(p.price)}</td></tr>`).join('')}</tbody></table></div>`;
       form.querySelectorAll('[data-import-price]').forEach(input=>input.oninput=()=>{const product=products.find(p=>p.id===input.dataset.importPrice);product.price=input.value.trim()&&input.validity.valid?Math.round(Number(input.value)*100):null;});
@@ -431,7 +439,7 @@ function editShipment(existing,brand){
     if(warnings.length&&!$('#accept-warnings')?.checked){$('#import-error').textContent='Подтвердите проверку замечаний.';return;}
     const b=$('#save-shipment');b.disabled=true;$('#import-error').textContent='';
     try{
-      await api('/admin/shipments','POST',{id:brand.id,title:brand.name,brand:brand.name,status:'arrived',stockMode:'live',description:'',groupingMode:'manual',groups,products,publishBrand:$('#publish-brand').checked,expectedBrandRevision:brand.revision});
+      await api('/admin/shipments','POST',{id:brand.id,title:brand.name,brand:brand.name,status:'arrived',stockMode:'live',description:'',groupingMode:'manual',groups,products,...(importCategory?{importCategory}:{}),publishBrand:$('#publish-brand').checked,expectedBrandRevision:brand.revision});
       closeDialog();await refresh();toast(`${brand.name}: каталог обновлён.`);
     }catch(e){if($('#import-error')){$('#import-error').textContent=e.message;b.disabled=false;}else toast(e.message);}
   };
