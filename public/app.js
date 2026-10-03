@@ -127,7 +127,7 @@ function cards(){
   const list=visibleBrands().map(brand=>({brand,catalog:catalogForBrand(brand.id)}));
   $('#shipment-grid').innerHTML=list.map(({brand,catalog})=>{
     const available=sellableProducts(catalog),examples=available.filter(p=>p.image||p.imageKey).slice(0,2);
-    return `<article class="brand-card"><button class="brand-open" data-brand="${esc(brand.id)}"><div class="brand-visual${brand.cover||examples.length?' has-photo':''}">${brand.cover?`<img class="brand-cover" src="${esc(brand.cover)}" alt="${esc(brand.name)}" loading="lazy">`:examples.map(p=>photo(p,'cover-photo')).join('')}<span class="brand-name">${esc(brand.name)}</span></div><div class="brand-card-footer"><span>${available.length} товаров</span></div></button></article>`;
+    return `<article class="brand-card"><button class="brand-open" data-brand="${esc(brand.id)}"><div class="brand-visual${brand.cover||examples.length?' has-photo':''}">${brand.cover?`<img class="brand-cover" src="${esc(brand.cover)}" alt="${esc(brand.name)}" loading="lazy">`:examples.map(p=>photo(p,'cover-photo')).join('')}${brand.cover?'':`<span class="brand-name">${esc(brand.name)}</span>`}</div><div class="brand-card-footer"><span>${available.length} товаров</span></div></button></article>`;
   }).join('');
   document.querySelectorAll('[data-brand]').forEach(button=>button.onclick=()=>openShipment(button.dataset.brand));
   const results=$('#search-results');results.hidden=!query;
