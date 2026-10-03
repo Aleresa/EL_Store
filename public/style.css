@@ -105,3 +105,11 @@
 @media(max-width:640px){[data-category-brand="remax"] .category-card{min-height:148px;padding:12px 8px;border-radius:17px}}
 
 .topbar-actions{display:flex;align-items:center;gap:8px;flex-shrink:0}.contact-button{display:inline-flex;align-items:center;justify-content:center;min-height:36px;padding:8px 12px;border:1px solid var(--line);border-radius:12px;background:var(--accent);color:var(--primary-ink);font-size:12px;font-weight:600;text-decoration:none;white-space:nowrap}.contact-button:hover{background:var(--primary)}
+
+/* Square category tiles, with the Remax glass finish preserved. */
+.category-grid .category-card:is([data-category="Оригинал"],[data-category="Копия"],[data-category="GL-27"],[data-category="GL-27 Privacy"],[data-category="ES-01"],[data-category="Cases" i],[data-category="Bags" i]){width:100%;min-width:0;min-height:0;aspect-ratio:1/1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center}
+.category-grid .category-card:is([data-category="Оригинал"],[data-category="Cases" i]){background:#B3F0C7}
+.category-grid .category-card:is([data-category="Копия"],[data-category="Bags" i]){background:#F0C7B3}
+.category-grid .category-card:is([data-category="Оригинал"],[data-category="Копия"],[data-category="Cases" i],[data-category="Bags" i]){--frost:#B3F0C7;overflow:hidden;isolation:isolate;border:1px solid #ffffffd9;background:linear-gradient(145deg,#ffffff8c,#ffffff20),var(--frost);box-shadow:inset 0 0 24px #ffffff80,inset 0 1px 0 #fff,0 7px 20px #2D29330c;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
+.category-grid .category-card:is([data-category="Копия"],[data-category="Bags" i]){--frost:#F0C7B3}
+.category-grid .category-card:is([data-category="Оригинал"],[data-category="Копия"],[data-category="Cases" i],[data-category="Bags" i])::before{content:"";position:absolute;inset:0;z-index:-1;pointer-events:none;opacity:.12;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Cpath fill='%23fff' filter='url(%23n)' opacity='.6' d='M0 0h160v160H0z'/%3E%3C/svg%3E")}
