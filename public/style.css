@@ -113,3 +113,9 @@
 .category-grid .category-card:is([data-category="Оригинал"],[data-category="Копия"],[data-category="Cases" i],[data-category="Bags" i]){--frost:#B3F0C7;overflow:hidden;isolation:isolate;border:1px solid #ffffffd9;background:linear-gradient(145deg,#ffffff8c,#ffffff20),var(--frost);box-shadow:inset 0 0 24px #ffffff80,inset 0 1px 0 #fff,0 7px 20px #2D29330c;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
 .category-grid .category-card:is([data-category="Копия"],[data-category="Bags" i]){--frost:#F0C7B3}
 .category-grid .category-card:is([data-category="Оригинал"],[data-category="Копия"],[data-category="Cases" i],[data-category="Bags" i])::before{content:"";position:absolute;inset:0;z-index:-1;pointer-events:none;opacity:.12;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Cpath fill='%23fff' filter='url(%23n)' opacity='.6' d='M0 0h160v160H0z'/%3E%3C/svg%3E")}
+
+.category-grid:has(.category-with-cover){align-items:start}
+.category-grid .category-card.category-with-cover{display:block;min-height:0;height:auto;aspect-ratio:auto;padding:0 0 14px;overflow:hidden;background:#fff;text-align:center}
+.category-card.category-with-cover .category-cover{display:block;width:100%;height:auto;object-fit:contain;margin:0 0 14px;border-radius:0}
+.category-card.category-with-cover strong{padding:0 10px}
+.category-card.category-with-cover span{padding:0 10px}

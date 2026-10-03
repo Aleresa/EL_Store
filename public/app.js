@@ -141,13 +141,14 @@ function cards(){
   list.forEach(({catalog})=>catalog&&loadImages({...catalog,products:sellableProducts(catalog)}));
 }
 function openShipment(id){if(state.current!==id){state.productGroup='';state.phoneModel='';}state.current=id;state.view='shipments';render();window.scrollTo(0,0);}
+const iphoneSeriesCovers={'alba series':'alba','shockproof series':'shockproof','ocean series':'ocean','slim series':'slim'};
 function renderDetail(){
   const s=activeShipment();if(!s){state.current=null;render();return;}
   const brand=brandById(s.id);
   const categories=brand?.categories||[],visible=sellableProducts(s);
   if(!categories.some(name=>groupKey(name)===groupKey(state.productGroup)))state.productGroup='';
   if(!state.productGroup){
-    app.innerHTML=`<button class="back" id="back">← Бренды</button><section class="detail-head"><p class="eyebrow">КАТАЛОГ</p><h1>${esc(brand?.name||s.brand||s.title)}</h1><p class="subtitle">Выберите категорию.</p></section><div class="category-grid count-${categories.length}" data-category-brand="${esc(s.id)}">${categories.map(name=>{const count=visible.filter(p=>groupKey(p.group)===groupKey(name)).length;return `<button class="category-card" data-category="${esc(name)}"><strong>${esc(name)}</strong><span>${count} товаров</span></button>`;}).join('')}</div>`;
+    app.innerHTML=`<button class="back" id="back">← Бренды</button><section class="detail-head"><p class="eyebrow">КАТАЛОГ</p><h1>${esc(brand?.name||s.brand||s.title)}</h1><p class="subtitle">Выберите категорию.</p></section><div class="category-grid count-${categories.length}" data-category-brand="${esc(s.id)}">${categories.map(name=>{const count=visible.filter(p=>groupKey(p.group)===groupKey(name)).length;const cover=groupKey(brand?.name||s.brand||s.title)==='iphone'?iphoneSeriesCovers[groupKey(name)]:null;return `<button class="category-card${cover?' category-with-cover':''}" data-category="${esc(name)}" aria-label="${esc(name)}">${cover?`<img class="category-cover" src="./images/series/${cover}.webp" alt="" width="800" height="1067" loading="lazy">`: ''}${cover?'':`<strong>${esc(name)}</strong>`}<span>${count} товаров</span></button>`;}).join('')}</div>`;
     $('#back').onclick=goBack;
     document.querySelectorAll('[data-category]').forEach(button=>button.onclick=()=>{state.productGroup=button.dataset.category;state.phoneModel='';render();window.scrollTo(0,0);});
     loadImages({...s,products:visible});
