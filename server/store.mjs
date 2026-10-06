@@ -1,3 +1,4 @@
+import {MIN_ORDER,validPrices,isRemaxGlass,priceLines} from '../public/pricing.js';
 import {ApiError} from './auth.mjs';
 import {groupKey} from '../public/product-groups.js';
 import {DEFAULT_BRANDS} from '../public/catalog-config.js';
@@ -113,6 +114,7 @@ export class Inventory {
     const products = input.products.map((p,position)=>{
       const stock=p.stock ?? p.total;
       if (!validId(p.id) || ids.has(p.id) || !trim(p.name,500) || !Number.isSafeInteger(stock) || stock<0 || stock>10000000 || !Number.isSafeInteger(p.price) || p.price<0 || p.price>100000000) throw new ApiError(400,'В товарах есть некорректный артикул, количество, цена или дубликат.');
+      if(p.prices!==undefined&&(!validPrices(p.prices)||p.price!==p.prices[0]))throw new ApiError(400,'Проверьте цены Опт 1, Опт 2, Опт 3.');
       ids.add(p.id);
       if (p.image && (typeof p.image!=='string'||!/^data:image\/(webp|png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(p.image))) throw new ApiError(400,`${p.sku||p.id}: неверный формат фотографии. Загрузите Excel заново.`);
       if (p.image?.length>180000) throw new ApiError(400,`${p.sku||p.id}: фотография слишком большая. Обновите приложение и загрузите Excel заново для сжатия.`);
@@ -122,7 +124,7 @@ export class Inventory {
       const groupName=groupNames.find(g=>groupKey(g)===groupKey(group));
       if(fixedCategories&&!groupName)throw new ApiError(400,`${p.sku||p.id}: выберите категорию товара.`);
       if(group&&!groupName)throw new ApiError(400,'Выберите существующую категорию товара.');
-      return {id:p.id,sku:trim(p.sku || p.id,80),name:trim(p.name,500),group:groupName||'',position,price:p.price,unit:trim(p.unit || 'шт',20),image:p.image || null,imageKey:p.imageKey || null,stock,total:stock};
+      return {id:p.id,sku:trim(p.sku || p.id,80),name:trim(p.name,500),group:groupName||'',position,price:p.price,...(p.prices?{prices:p.prices}:{}),unit:trim(p.unit || 'шт',20),image:p.image || null,imageKey:p.imageKey || null,stock,total:stock};
     });
     return this.transaction(()=>{
       if(shipment.stockMode==='live') {
@@ -185,7 +187,7 @@ export class Inventory {
         return {...data,status:previous.status,repeated:true};
       }
       const catalogs=new Map();
-      const detailed=lines.map(l=>{
+      let detailed=lines.map(l=>{
         const shipmentId=l.shipmentId??input.shipmentId;
         const shipmentRow=this.one('SELECT data FROM shipments WHERE id=?',shipmentId);
         const shipment=shipmentRow&&JSON.parse(shipmentRow.data);
@@ -196,12 +198,15 @@ export class Inventory {
         const product=JSON.parse(row.data);
         if(product.hidden)throw new ApiError(409,'Товар больше не доступен.');
         if(row.total-row.placed<l.quantity)throw new ApiError(409,`${product.sku}: свободно ${row.total-row.placed} шт. Проверьте корзину.`);
-        if(l.expectedPrice!==undefined&&l.expectedPrice!==product.price)throw new ApiError(409,`${product.sku}: цена изменилась. Проверьте корзину.`);
-        return {id:l.id,...(explicitBrands?{shipmentId,shipmentTitle:shipment.title}:{}),sku:product.sku,name:product.name,quantity:l.quantity,price:product.price};
+
+        return {id:l.id,...(explicitBrands?{shipmentId,shipmentTitle:shipment.title}:{}),sku:product.sku,name:product.name,quantity:l.quantity,price:product.price,prices:product.prices,wholesale:isRemaxGlass(this.brand(shipmentId),product)};
       });
+      detailed=priceLines(detailed);
+      for(let i=0;i<lines.length;i++)if(lines[i].expectedPrice!==undefined&&lines[i].expectedPrice!==detailed[i].price)throw new ApiError(409,'Цена изменилась. Проверьте заказ.');
       const shipmentIds=[...catalogs.keys()],shipmentId=shipmentIds.length===1?shipmentIds[0]:'mixed';
       const data={id:crypto.randomUUID(),shipmentId,shipmentIds,shipmentTitle:[...catalogs.values()].join(' + '),user,lines:detailed,comment,status:'placed',revision:1,createdAt:new Date().toISOString(),total:detailed.reduce((sum,l)=>sum+l.price*l.quantity,0)};
       if(!Number.isSafeInteger(data.total))throw new ApiError(400,'Слишком большая сумма.');
+      if(input.enforceMinimum===true && data.total<MIN_ORDER)throw new ApiError(400,'Минимальный заказ от 10.000 рублей.');
       for(const l of detailed)this.sql.exec('UPDATE products SET placed=placed+? WHERE shipment=? AND id=?',l.quantity,l.shipmentId??shipmentId,l.id);
       this.sql.exec('INSERT INTO orders(id,user_id,request_key,fingerprint,shipment,status,data) VALUES(?,?,?,?,?,?,?)',data.id,user.id,input.requestKey,fingerprint,shipmentId,data.status,JSON.stringify(data));
       this.enqueue(data,'created');return data;
@@ -224,7 +229,7 @@ export class Inventory {
       if(revision!==input.expectedRevision)throw new ApiError(409,'Заказ уже изменён. Обновите список заказов и откройте его заново.');
       const old=new Map(previous.lines.map(l=>{const item={...l,shipmentId:l.shipmentId??row.shipment};return [lineKey(item),item];}));
       const catalogs=new Map();
-      const detailed=lines.map(line=>{
+      let detailed=lines.map(line=>{
         const l={...line,shipmentId:line.shipmentId??row.shipment};
         const shipmentRow=this.one('SELECT data FROM shipments WHERE id=?',l.shipmentId),shipment=shipmentRow&&JSON.parse(shipmentRow.data);
         if(!shipment||(!admin&&(!this.brand(l.shipmentId)||this.brand(l.shipmentId).hidden||!ACTIVE.has(shipment.status))))throw new ApiError(409,'Изменение этого каталога закрыто. Обратитесь в магазин.');
@@ -235,12 +240,15 @@ export class Inventory {
         if(product.hidden&&!existing)throw new ApiError(409,'Товар больше не доступен.');
         const available=productRow.total-productRow.placed+(existing?.quantity||0);
         if(l.quantity>available)throw new ApiError(409,`${product.sku}: можно оставить максимум ${available} шт. с учётом вашего заказа.`);
-        if(!existing&&l.expectedPrice!==undefined&&l.expectedPrice!==product.price)throw new ApiError(409,'Цена изменилась. Откройте заказ заново.');
-        return {id:l.id,shipmentId:l.shipmentId,shipmentTitle:shipment.title,sku:existing?.sku||product.sku,name:existing?.name||product.name,quantity:l.quantity,price:existing?.price??product.price};
+
+        return {id:l.id,shipmentId:l.shipmentId,shipmentTitle:shipment.title,sku:existing?.sku||product.sku,name:existing?.name||product.name,quantity:l.quantity,price:existing?.price??product.price,prices:existing?existing.prices:product.prices,wholesale:existing?.wholesale??isRemaxGlass(this.brand(l.shipmentId),product)};
       });
+      detailed=priceLines(detailed);
+      for(let i=0;i<lines.length;i++)if(lines[i].expectedPrice!==undefined&&lines[i].expectedPrice!==detailed[i].price)throw new ApiError(409,'Цена изменилась. Проверьте заказ.');
       const shipmentIds=[...catalogs.keys()],shipmentId=shipmentIds.length===1?shipmentIds[0]:'mixed';
       const data={...previous,shipmentId,shipmentIds,shipmentTitle:[...catalogs.values()].join(' + '),lines:detailed,comment,status:row.status,revision:revision+1,editedAt:new Date().toISOString(),total:detailed.reduce((sum,l)=>sum+l.price*l.quantity,0)};
       if(!Number.isSafeInteger(data.total))throw new ApiError(400,'Слишком большая сумма.');
+      if(input.enforceMinimum===true && data.total<MIN_ORDER)throw new ApiError(400,'Минимальный заказ от 10.000 рублей.');
       const next=new Map(detailed.map(l=>[lineKey(l),l]));
       for(const key of new Set([...old.keys(),...next.keys()])) {
         const l=next.get(key)||old.get(key),delta=(next.get(key)?.quantity||0)-(old.get(key)?.quantity||0);

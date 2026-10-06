@@ -1,3 +1,4 @@
+import {isRemaxGlass,priceLines} from './pricing.js';
 import {catalogBrand} from './catalog-config.js';
 export const cartKey=(shipmentId,id)=>`${shipmentId}:${id}`;
 export const cartEntry=(shipmentId,p,quantity)=>({shipmentId,id:p.id,sku:p.sku,name:p.name,price:p.price,quantity});
@@ -20,10 +21,11 @@ export function reconcileCart(cart,catalogs){
     }
     const quantity=Math.min(line.quantity,p.stock);
     if(quantity!==line.quantity)changes.push(`${label}: количество уменьшено с ${line.quantity} до ${quantity}.`);
-    if(line.price!==p.price)changes.push(`${label}: цена изменилась с ${(line.price/100).toFixed(2)} до ${(p.price/100).toFixed(2)} ₽.`);
     next[cartKey(line.shipmentId,p.id)]=cartEntry(line.shipmentId,p,quantity);
   }
-  return {cart:next,changes};
+  repriceCart(next,catalogs);
+  for(const [key,l] of Object.entries(next))if(cart[key]&&cart[key].price!==l.price)changes.push(`${l.sku}: цена изменилась с ${(cart[key].price/100).toFixed(2)} до ${(l.price/100).toFixed(2)} ₽.`);
+  return {cart:repriceCart(next,catalogs),changes};
 }
 export function repeatCart(cart,order,catalogs){
   const result=reconcileCart(cart,catalogs),next=result.cart,changes=[...result.changes];
@@ -35,5 +37,11 @@ export function repeatCart(cart,order,catalogs){
     changes.push(...checked.changes);
     if(checked.cart[key])next[key]=checked.cart[key];
   }
-  return {cart:next,changes};
+  return {cart:repriceCart(next,catalogs),changes};
+}
+
+export function repriceCart(cart,catalogs){
+ const lines=Object.values(cart).map(l=>{const c=catalogs.find(s=>s.id===l.shipmentId),p=c?.products.find(p=>p.id===l.id);return p?{...l,price:p.price,prices:p.prices,wholesale:isRemaxGlass(catalogBrand(c),p)}:l;});
+ for(const l of priceLines(lines))cart[cartKey(l.shipmentId,l.id)]=l;
+ return cart;
 }

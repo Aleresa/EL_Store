@@ -119,3 +119,5 @@
 .category-card.category-with-cover .category-cover{display:block;width:100%;height:auto;object-fit:contain;margin:0 0 14px;border-radius:0}
 .category-card.category-with-cover strong{padding:0 10px}
 .category-card.category-with-cover span{padding:0 10px}
+
+.topbar-actions{flex-wrap:wrap;justify-content:flex-end}.minimum-order{font-size:11px;line-height:1.35;max-width:145px;text-align:right}@media(max-width:480px){.topbar{flex-wrap:wrap;gap:8px}.topbar-actions{flex:1}.minimum-order{max-width:125px}}

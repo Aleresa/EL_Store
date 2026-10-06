@@ -1,7 +1,8 @@
+import {MIN_ORDER,isRemaxGlass,unitPrice,wholesaleTier} from './pricing.js';
 import {readSupplierExcel,exportOrders} from './xlsx.js';
 import {manualProducts,groupKey} from './product-groups.js';
 import {DEFAULT_BRANDS,searchCatalog} from './catalog-config.js';
-import {cartKey,cartEntry,readCart,reconcileCart,repeatCart} from './cart.js';
+import {cartKey,cartEntry,readCart,reconcileCart,repeatCart,repriceCart} from './cart.js';
 import {phoneModels,sortProducts} from './catalog-tools.js';
 
 const $=s=>document.querySelector(s), app=$('#app'), dialog=$('#dialog');
@@ -131,7 +132,7 @@ function cards(){
   }).join('');
   document.querySelectorAll('[data-brand]').forEach(button=>button.onclick=()=>openShipment(button.dataset.brand));
   const results=$('#search-results');results.hidden=!query;
-  results.innerHTML=query?`${controls}<div class="section-header"><h2>Найдено товаров: ${matches.length}</h2></div>${matches.length?`<div class="search-products">${matches.slice(0,100).map(({brand,product:p},index)=>`<button class="search-product" data-search-result="${index}">${photo(p)}<span><small>${esc(brand.name)} · ${esc(p.group)} · ${esc(p.sku)}</small><strong>${esc(p.name)}</strong><span class="price">${money(p.price)}</span></span></button>`).join('')}</div>${matches.length>100?'<p class="fine-print">Показаны первые 100 товаров. Уточните запрос.</p>':''}`:'<p class="empty">Ничего не найдено. Попробуйте другое название, модель или артикул.</p>'}`:'';
+  results.innerHTML=query?`${controls}<div class="section-header"><h2>Найдено товаров: ${matches.length}</h2></div>${matches.length?`<div class="search-products">${matches.slice(0,100).map(({brand,product:p},index)=>`<button class="search-product" data-search-result="${index}">${photo(p)}<span><small>${esc(brand.name)} · ${esc(p.group)} · ${esc(p.sku)}</small><strong>${esc(p.name)}</strong><span class="price">${money(displayPrice(p,brand))}</span></span></button>`).join('')}</div>${matches.length>100?'<p class="fine-print">Показаны первые 100 товаров. Уточните запрос.</p>':''}`:'<p class="empty">Ничего не найдено. Попробуйте другое название, модель или артикул.</p>'}`:'';
   bindSorting(cards);
   results.querySelectorAll('[data-search-result]').forEach(button=>button.onclick=()=>{
     const {brand,product}=matches[Number(button.dataset.searchResult)];
@@ -161,12 +162,14 @@ function renderDetail(){
   bindSorting(()=>products($('#product-search').value));
   $('#back').onclick=goBack;products('');loadImages({...s,products:visible.filter(p=>groupKey(p.group)===groupKey(category))});
 }
+function remaxQuantity(){return Object.values(state.cart).reduce((n,l)=>{const s=state.shipments.find(s=>s.id===l.shipmentId),p=s?.products.find(p=>p.id===l.id);return n+(p&&isRemaxGlass(brandById(s.id),p)?l.quantity:0);},0);}
+function displayPrice(p,brand){return unitPrice(p,remaxQuantity(),isRemaxGlass(brand,p));}
 function products(query){
   const s=activeShipment(),category=state.productGroup;
   const list=filteredProducts(sellableProducts(s).filter(p=>groupKey(p.group)===groupKey(category)&&`${p.name} ${p.sku}`.toLowerCase().includes(query.toLowerCase())));
   $('#products').innerHTML=list.length?`<div class="products">${list.map(p=>{
     const qty=state.cart[cartKey(s.id,p.id)]?.quantity||0,disabled=Boolean(state.pendingOrder)||(!isOpen(s)&&!state.preview)||p.stock<=0;
-    return `<article class="product compact-product ${qty?'selected':''}" data-product="${esc(p.id)}">${p.image||p.imageKey?`<button class="photo-button" data-enlarge="${esc(p.id)}" aria-label="Увеличить фото ${esc(p.name)}">${photo(p)}</button>`:photo(p)}<div class="product-info"><span class="sku">${esc(p.sku)}</span><p class="product-title">${esc(p.name)}</p><span class="price">${money(p.price)} <small>/ ${esc(p.unit||'шт.')}</small></span><div class="stock">В наличии: ${p.stock}</div></div><div class="product-controls"><div class="stepper"><button data-step="-1" data-id="${esc(p.id)}" aria-label="Уменьшить количество" ${disabled?'disabled':''}>−</button><input data-qty="${esc(p.id)}" type="number" inputmode="numeric" min="0" max="${p.stock}" value="${qty}" aria-label="Количество ${esc(p.sku)}" ${disabled?'disabled':''}><button data-step="1" data-id="${esc(p.id)}" aria-label="Увеличить количество" ${disabled?'disabled':''}>+</button></div><strong class="line-total" data-line-total="${esc(p.id)}">${money(qty*p.price)}</strong></div></article>`;
+    return `<article class="product compact-product ${qty?'selected':''}" data-product="${esc(p.id)}">${p.image||p.imageKey?`<button class="photo-button" data-enlarge="${esc(p.id)}" aria-label="Увеличить фото ${esc(p.name)}">${photo(p)}</button>`:photo(p)}<div class="product-info"><span class="sku">${esc(p.sku)}</span><p class="product-title">${esc(p.name)}</p><span class="price">${money(displayPrice(p,brandById(s.id)))} <small>/ ${esc(p.unit||'шт.')}</small></span><div class="stock">В наличии: ${p.stock}</div></div><div class="product-controls"><div class="stepper"><button data-step="-1" data-id="${esc(p.id)}" aria-label="Уменьшить количество" ${disabled?'disabled':''}>−</button><input data-qty="${esc(p.id)}" type="number" inputmode="numeric" min="0" max="${p.stock}" value="${qty}" aria-label="Количество ${esc(p.sku)}" ${disabled?'disabled':''}><button data-step="1" data-id="${esc(p.id)}" aria-label="Увеличить количество" ${disabled?'disabled':''}>+</button></div><strong class="line-total" data-line-total="${esc(p.id)}">${money(qty*displayPrice(p,brandById(s.id)))}</strong></div></article>`;
   }).join('')}</div>`:'<p class="empty">В этой категории товаров пока нет.</p>';
   document.querySelectorAll('[data-step]').forEach(b=>b.onclick=()=>setQuantity(b.dataset.id,(state.cart[cartKey(s.id,b.dataset.id)]?.quantity||0)+Number(b.dataset.step)));
   document.querySelectorAll('[data-qty]').forEach(input=>input.onchange=()=>setQuantity(input.dataset.qty,Number(input.value)));
@@ -182,9 +185,11 @@ function setQuantity(id,value){
   if(qty)state.cart[key]=cartEntry(shipment.id,p,qty);else delete state.cart[key];saveCart();
   const el=[...document.querySelectorAll('[data-qty]')].find(e=>e.dataset.qty===id);if(el){el.value=qty;el.closest('.product').classList.toggle('selected',qty>0);}
   const total=document.querySelector(`[data-line-total="${CSS.escape(id)}"]`);if(total)total.textContent=money(qty*p.price);
+  repriceCart(state.cart,state.shipments);saveCart();
+  document.querySelectorAll('[data-product]').forEach(row=>{const product=shipment.products.find(p=>p.id===row.dataset.product);if(!product)return;const price=displayPrice(product,brandById(shipment.id));row.querySelector('.price').innerHTML=money(price)+' <small>/ '+esc(product.unit||'шт.')+'</small>';row.querySelector('.line-total').textContent=money((state.cart[cartKey(shipment.id,product.id)]?.quantity||0)*price);});
   cartBar();
 }
-function totals(){return Object.values(state.cart).reduce((r,l)=>({count:r.count+l.quantity,total:r.total+l.quantity*l.price}),{count:0,total:0});}
+function totals(){if(!state.pendingOrder)repriceCart(state.cart,state.shipments);return Object.values(state.cart).reduce((r,l)=>({count:r.count+l.quantity,total:r.total+l.quantity*l.price}),{count:0,total:0});}
 function cartBar(){
   const t=totals(),visible=t.count>0||Boolean(state.pendingOrder);
   $('#cart-bar').hidden=!visible;document.body.classList.toggle('has-cart',visible);
@@ -201,7 +206,7 @@ async function showCart(){
 }
 function drawCart(){
   const t=totals(),locked=Boolean(state.pendingOrder);
-  showDialog('Ваша корзина',`${state.cartChanges.length?`<div class="warning" role="status"><strong>Корзина обновлена. Проверьте изменения:</strong><ul>${[...new Set(state.cartChanges)].map(c=>`<li>${esc(c)}</li>`).join('')}</ul></div>`:''}${locked?'<p class="warning">Предыдущая отправка ещё не подтверждена. Нажмите «Проверить отправку»: повторный запрос не создаст второй заказ.</p>':''}${Object.values(state.cart).map(l=>`<div class="cart-line"><small>${esc(brandById(l.shipmentId)?.name)}</small><p>${esc(l.name)}</p><span class="muted">${esc(l.sku)} · ${money(l.price)} / шт.</span><div class="cart-quantity"><label>Количество<input data-cart-qty="${esc(cartKey(l.shipmentId,l.id))}" type="number" min="1" step="1" value="${l.quantity}" ${locked?'disabled':''}></label><button class="danger" data-cart-remove="${esc(cartKey(l.shipmentId,l.id))}" ${locked?'disabled':''}>Убрать</button></div></div>`).join('')||'<p class="empty">Корзина пуста. Выберите товары в каталоге.</p>'}<div class="cart-total"><span>${t.count} шт.</span><span>${money(t.total)}</span></div><label class="field">Комментарий<textarea id="comment" maxlength="1000" placeholder="Например, название магазина" ${locked?'disabled':''}>${esc(state.comment)}</textarea></label><p class="fine-print">Товары разных брендов оформляются одним заказом. Перед отправкой проверяются актуальные цены и остатки.</p>${state.preview?'<p class="warning">Предпросмотр. Заказ не будет оформлен.</p>':''}<p id="placeOrder-error" class="error" role="alert"></p><button class="primary full" id="submit-placeOrder" ${state.preview||!state.ready||(!t.count&&!locked)?'disabled':''}>${locked?'Проверить отправку':'Оформить заказ'}</button>`);
+  showDialog('Ваша корзина',`${state.cartChanges.length?`<div class="warning" role="status"><strong>Корзина обновлена. Проверьте изменения:</strong><ul>${[...new Set(state.cartChanges)].map(c=>`<li>${esc(c)}</li>`).join('')}</ul></div>`:''}${locked?'<p class="warning">Предыдущая отправка ещё не подтверждена. Нажмите «Проверить отправку»: повторный запрос не создаст второй заказ.</p>':''}${Object.values(state.cart).map(l=>`<div class="cart-line"><small>${esc(brandById(l.shipmentId)?.name)}</small><p>${esc(l.name)}</p><span class="muted">${esc(l.sku)} · ${money(l.price)} / шт.</span><div class="cart-quantity"><label>Количество<input data-cart-qty="${esc(cartKey(l.shipmentId,l.id))}" type="number" min="1" step="1" value="${l.quantity}" ${locked?'disabled':''}></label><button class="danger" data-cart-remove="${esc(cartKey(l.shipmentId,l.id))}" ${locked?'disabled':''}>Убрать</button></div></div>`).join('')||'<p class="empty">Корзина пуста. Выберите товары в каталоге.</p>'}<div class="cart-total"><span>${t.count} шт.</span><span>${money(t.total)}</span></div>${t.total<MIN_ORDER?`<p class="warning">Минимальный заказ от 10.000 рублей. Добавьте товаров ещё на ${money(MIN_ORDER-t.total)}.</p>`:''}${remaxQuantity()?`<p class="fine-print">Стёкол Remax: ${remaxQuantity()} шт. · Опт ${wholesaleTier(remaxQuantity())+1}. До 19 шт. — Опт 1, 20–99 — Опт 2, от 100 — Опт 3.</p>`:''}<label class="field">Комментарий<textarea id="comment" maxlength="1000" placeholder="Например, название магазина" ${locked?'disabled':''}>${esc(state.comment)}</textarea></label><p class="fine-print">Товары разных брендов оформляются одним заказом. Перед отправкой проверяются актуальные цены и остатки.</p>${state.preview?'<p class="warning">Предпросмотр. Заказ не будет оформлен.</p>':''}<p id="placeOrder-error" class="error" role="alert"></p><button class="primary full" id="submit-placeOrder" ${state.preview||!state.ready||((!t.count||t.total<MIN_ORDER)&&!locked)?'disabled':''}>${locked?'Проверить отправку':'Оформить заказ'}</button>`);
   $('#comment').oninput=e=>{state.comment=e.target.value;saveCart();};
   dialog.querySelectorAll('[data-cart-remove]').forEach(b=>b.onclick=()=>{if(cartLocked())return;delete state.cart[b.dataset.cartRemove];saveCart();cartBar();drawCart();});
   dialog.querySelectorAll('[data-cart-qty]').forEach(el=>el.onchange=()=>{
@@ -220,8 +225,8 @@ async function submitCart(){
       state.shipments=(await api('/catalog')).shipments;
       const checked=reconcileCart(state.cart,state.shipments);state.cart=checked.cart;
       if(checked.changes.length){state.cartChanges.push(...checked.changes);saveCart();cartBar();drawCart();return;}
-      if(!Object.keys(state.cart).length){drawCart();return;}
-      state.pendingOrder={requestKey:crypto.randomUUID(),lines:Object.values(state.cart).map(l=>({shipmentId:l.shipmentId,id:l.id,quantity:l.quantity,expectedPrice:l.price})),comment:state.comment};
+      if(!Object.keys(state.cart).length||totals().total<MIN_ORDER){drawCart();return;}
+      state.pendingOrder={enforceMinimum:true,requestKey:crypto.randomUUID(),lines:Object.values(state.cart).map(l=>({shipmentId:l.shipmentId,id:l.id,quantity:l.quantity,expectedPrice:l.price})),comment:state.comment};
       saveCart();
     }
     dialog.querySelectorAll('input,textarea,button').forEach(el=>el.disabled=true);
@@ -267,14 +272,16 @@ async function editOrderForm(order,all){
   try{const catalogs=(await api('/catalog')).shipments;shipment={products:catalogs.flatMap(s=>sellableProducts(s).map(p=>({...p,originalId:p.id,id:cartKey(s.id,p.id),shipmentId:s.id,name:s.title+' · '+p.name})))};}catch(e){toast(e.message);return;}
   const originals=new Map(order.lines.map(l=>[cartKey(l.shipmentId??order.shipmentId,l.id),l])),draft=new Map([...originals].map(([id,l])=>[id,l.quantity]));
   let requestKey=null;
-  showDialog('Изменить заказ',`<p class="muted">${esc(order.shipmentTitle)}</p><p class="fine-print">Поставьте 0, чтобы убрать позицию. Увеличение количества возможно в пределах наличия. Для полного отказа отмените заказ.</p><form id="edit-order-form"><div id="edit-order-lines"></div><label class="field">Добавить товар<select id="add-order-product"><option value="">Выберите товар</option></select></label><p class="fine-print">Цена ранее выбранных позиций сохраняется. Новые позиции добавляются по текущей цене.</p><label class="field">Комментарий<textarea id="edit-order-comment" maxlength="1000">${esc(order.comment)}</textarea></label><p class="cart-total" id="edit-order-total"></p><p id="edit-order-error" class="error" role="alert"></p><button type="button" class="secondary full" id="reload-orders" hidden>Обновить список заказов</button><button class="primary full" type="submit" id="save-order">Сохранить изменения</button></form>`);
+  showDialog('Изменить заказ',`<p class="muted">${esc(order.shipmentTitle)}</p><p class="fine-print">Поставьте 0, чтобы убрать позицию. Увеличение количества возможно в пределах наличия. Для полного отказа отмените заказ.</p><form id="edit-order-form"><div id="edit-order-lines"></div><label class="field">Добавить товар<select id="add-order-product"><option value="">Выберите товар</option></select></label><p class="fine-print">Для стёкол Remax оптовая цена пересчитывается по общему количеству. Для остальных товаров ранее выбранная цена сохраняется. Минимальный заказ — 10 000 ₽.</p><label class="field">Комментарий<textarea id="edit-order-comment" maxlength="1000">${esc(order.comment)}</textarea></label><p class="cart-total" id="edit-order-total"></p><p id="edit-order-error" class="error" role="alert"></p><button type="button" class="secondary full" id="reload-orders" hidden>Обновить список заказов</button><button class="primary full" type="submit" id="save-order">Сохранить изменения</button></form>`);
   const form=$('#edit-order-form');
-  const price=id=>originals.get(id)?.price??shipment.products.find(p=>p.id===id)?.price??0;
-  function total(){const sum=[...draft].reduce((n,[id,q])=>n+q*price(id),0);$('#edit-order-total').textContent='Итого: '+money(sum);}
+  const draftProduct=id=>originals.get(id)||shipment.products.find(p=>p.id===id)||{price:0};
+  const eligible=id=>{const p=draftProduct(id);return p.wholesale??isRemaxGlass(brandById(p.shipmentId||order.shipmentId),p);};
+  const price=id=>unitPrice(draftProduct(id),[...draft].reduce((n,[key,q])=>n+(eligible(key)?q:0),0),eligible(id));
+  function total(){const sum=[...draft].reduce((n,[id,q])=>n+q*price(id),0);$('#edit-order-total').textContent='Итого: '+money(sum)+(sum<MIN_ORDER?' · Минимум 10 000 ₽':'');$('#save-order').disabled=sum<MIN_ORDER;form.querySelectorAll('[data-edit-price]').forEach(el=>el.textContent=money(price(el.dataset.editPrice)));}
   function draw(){
     $('#edit-order-lines').innerHTML=[...draft].map(([id,quantity])=>{
       const p=shipment.products.find(p=>p.id===id),old=originals.get(id),max=(p?.stock||0)+(old?.quantity||0);
-      return `<div class="cart-line"><p>${old?esc(brandById(old.shipmentId??order.shipmentId)?.name||old.shipmentTitle||order.shipmentTitle)+' · ':''}${esc(old?.name||p?.name)}</p><span class="muted">${esc(old?.sku||p?.sku)} · ${money(price(id))} · Доступно с вашим заказом: ${max} шт.</span><label class="field">Количество<input data-edit-qty="${esc(id)}" type="number" inputmode="numeric" required min="0" max="${max}" step="1" value="${quantity}"></label></div>`;
+      return `<div class="cart-line"><p>${old?esc(brandById(old.shipmentId??order.shipmentId)?.name||old.shipmentTitle||order.shipmentTitle)+' · ':''}${esc(old?.name||p?.name)}</p><span class="muted">${esc(old?.sku||p?.sku)} · <span data-edit-price="${esc(id)}">${money(price(id))}</span> · Доступно с вашим заказом: ${max} шт.</span><label class="field">Количество<input data-edit-qty="${esc(id)}" type="number" inputmode="numeric" required min="0" max="${max}" step="1" value="${quantity}"></label></div>`;
     }).join('');
     form.querySelectorAll('[data-edit-qty]').forEach(el=>el.oninput=()=>{draft.set(el.dataset.editQty,Number(el.value));requestKey=null;total();});
     $('#add-order-product').innerHTML='<option value="">Выберите товар</option>'+shipment.products.filter(p=>p.stock>0&&!draft.has(p.id)).map(p=>`<option value="${esc(p.id)}">${esc(p.sku)} · ${esc(p.name)} · ${money(p.price)}</option>`).join('');
@@ -288,8 +295,9 @@ async function editOrderForm(order,all){
     e.preventDefault();const error=$('#edit-order-error');error.textContent='';
     const lines=[...draft].filter(([,quantity])=>quantity>0).map(([key,quantity])=>{const [shipmentId,id]=key.split(':');return {shipmentId,id,quantity,...(!originals.has(key)?{expectedPrice:price(key)}:{})};});
     if(!lines.length||lines.length>100){error.textContent='Оставьте от 1 до 100 позиций. Для полного отказа отмените заказ.';return;}
+    if([...draft].reduce((n,[id,q])=>n+q*price(id),0)<MIN_ORDER){error.textContent='Минимальный заказ от 10.000 рублей.';return;}
     requestKey ||= crypto.randomUUID();
-    const input={requestKey,expectedRevision:order.revision||1,lines,comment:$('#edit-order-comment').value};
+    const input={enforceMinimum:true,requestKey,expectedRevision:order.revision||1,lines,comment:$('#edit-order-comment').value};
     const controls=[...form.querySelectorAll('input,select,textarea,button')];controls.forEach(c=>c.disabled=true);
     try{
       await api('/orders/'+order.id,'PATCH',input);closeDialog();toast('Заказ изменён. Остатки пересчитаны.');renderOrders(all);
@@ -428,7 +436,7 @@ function editShipment(existing,brand){
       products=importCategory?merged.map(p=>({...p,group:importCategory})):manualProducts(merged,groups,historyProducts);warnings=result.warnings;reviewCategories();
       const previousIds=new Set(historyProducts.filter(p=>!p.hidden&&(!importCategory||groupKey(p.group)===groupKey(importCategory))).map(p=>p.id)),nextIds=new Set(products.map(p=>p.id));
       const hidden=[...previousIds].filter(id=>!nextIds.has(id)).length;
-      $('#import-info').innerHTML=`<div class="import-summary">${products.length} позиций · ${products.filter(p=>p.image||p.imageKey).length} фотографий${hidden?` · будет скрыто: ${hidden}`:''}</div>${warnings.length?`<details class="warning"><summary>Замечания: ${warnings.length}</summary>${warnings.map(w=>`<div>${esc(w)}</div>`).join('')}</details><label class="field"><input id="accept-warnings" type="checkbox" style="width:auto;min-height:auto"> Проверил замечания</label>`:''}<div class="import-preview"><table><thead><tr><th>Товар</th><th>Остаток</th><th>Цена</th></tr></thead><tbody>${products.map(p=>`<tr><td>${esc(p.name)}<br>${esc(p.sku)}</td><td>${p.stock}</td><td>${p.price===null?`<input data-import-price="${esc(p.id)}" type="number" inputmode="decimal" required min="0" max="1000000" step="0.01" placeholder="Цена, ₽" aria-label="Цена ${esc(p.sku)}">`:money(p.price)}</td></tr>`).join('')}</tbody></table></div>`;
+      $('#import-info').innerHTML=`<div class="import-summary">${products.length} позиций · ${products.filter(p=>p.image||p.imageKey).length} фотографий${hidden?` · будет скрыто: ${hidden}`:''}</div>${warnings.length?`<details class="warning"><summary>Замечания: ${warnings.length}</summary>${warnings.map(w=>`<div>${esc(w)}</div>`).join('')}</details><label class="field"><input id="accept-warnings" type="checkbox" style="width:auto;min-height:auto"> Проверил замечания</label>`:''}<div class="import-preview"><table><thead><tr><th>Товар</th><th>Остаток</th><th>Цена</th></tr></thead><tbody>${products.map(p=>`<tr><td>${esc(p.name)}<br>${esc(p.sku)}</td><td>${p.stock}</td><td>${p.price===null?`<input data-import-price="${esc(p.id)}" type="number" inputmode="decimal" required min="0" max="1000000" step="0.01" placeholder="Цена, ₽" aria-label="Цена ${esc(p.sku)}">`:p.prices?p.prices.map((price,i)=>`Опт ${i+1}: ${money(price)}`).join('<br>'):money(p.price)}</td></tr>`).join('')}</tbody></table></div>`;
       form.querySelectorAll('[data-import-price]').forEach(input=>input.oninput=()=>{const product=products.find(p=>p.id===input.dataset.importPrice);product.price=input.value.trim()&&input.validity.valid?Math.round(Number(input.value)*100):null;});
       $('#save-shipment').disabled=false;
     }catch(e){if(controller.signal.aborted||!form.isConnected)return;products=null;$('#import-info').textContent='';$('#import-error').textContent=e.message;}
