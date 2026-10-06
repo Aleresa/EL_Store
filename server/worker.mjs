@@ -94,6 +94,10 @@ export class NewsletterStore {
         if(!admin)throw new ApiError(403,'Раздел доступен только владельцу.');
         return json({brand:this.inventory.saveBrand(await readJson(request),path.split('/').pop())});
       }
+      if(/^\/api\/admin\/brands\/[a-zA-Z0-9_-]{1,80}\/prices$/.test(path)&&request.method==='PATCH'){
+        if(!admin)throw new ApiError(403,'Раздел доступен только владельцу.');
+        return json(this.inventory.updatePrices(path.split('/')[4],(await readJson(request)).updates));
+      }
       if(/^\/api\/admin\/shipments\/[a-zA-Z0-9_-]{1,80}$/.test(path) && request.method==='DELETE') {
         if(!admin)throw new ApiError(403,'Раздел доступен только владельцу.');
         return json(this.inventory.deleteShipment(path.split('/').pop()));
