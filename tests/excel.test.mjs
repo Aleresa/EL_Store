@@ -67,5 +67,7 @@ test('legacy drawings map pictures to anchors, support continuations and exclude
   head[0].writeUInt32LE(head.reduce((n,b)=>n+b.length,0),4);
   const bytes=Buffer.concat([...head,biff(0x809,Buffer.alloc(4)),biff(0xec,drawing),biff(0x0a,Buffer.alloc(0)),biff(0x809,Buffer.alloc(4)),biff(0xec,drawing),biff(0x0a,Buffer.alloc(0))]);
   const pictures=xlsPictures(bytes);assert.equal(pictures.length,1);assert.equal(pictures[0].row,8);assert.deepEqual(Buffer.from(pictures[0].bytes),jpeg);
+  const interrupted=Buffer.concat([...head,biff(0x809,Buffer.alloc(4)),biff(0xec,drawing.subarray(0,20)),biff(0x5d,Buffer.alloc(38)),biff(0x3c,drawing.subarray(20)),biff(0x0a,Buffer.alloc(0))]);
+  assert.deepEqual(xlsPictures(interrupted),pictures,'drawing CONTINUE after OBJ keeps anchors and image data');
   assert.throws(()=>xlsPictures(bytes.subarray(0,20)),/Повреждён/);
 });

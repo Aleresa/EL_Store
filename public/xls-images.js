@@ -36,6 +36,9 @@ export function xlsPictures(stream) {
     if(offset===firstSheet)inFirst=true;
     if(type===0xeb)target=global;
     else if(type===0xec && inFirst)target=sheet;
+    // OBJ records interrupt OfficeArt chunks; following CONTINUE records still
+    // belong to the drawing. Do not append the OBJ payload itself.
+    else if(type===0x5d && target===sheet){offset=end;continue;}
     else if(type!==0x3c)target=null;
     if(target)target.push(bytes.subarray(offset+4,end));
     if(type===0x0a && inFirst)inFirst=false;
@@ -58,5 +61,6 @@ export function xlsPictures(stream) {
     if(row!==null && index!==null && pictures[index])result.push({row,bytes:pictures[index]});
     return false;
   });
-  return result;
+  // Repeated shapes at the same row should not trigger repeated image compression.
+  return [...new Map(result.map(p=>[p.row,p])).values()];
 }

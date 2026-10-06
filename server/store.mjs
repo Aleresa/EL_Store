@@ -56,9 +56,16 @@ export class Inventory {
       if(this.brands(true).some(b=>b.id!==id&&groupKey(b.name)===groupKey(name)))throw new ApiError(409,'Бренд с таким названием уже существует.');
       if(!id&&this.brands(true).length>=100)throw new ApiError(400,'Можно создать до 100 брендов.');
       if(previous){
+        const oldCategories=Array.isArray(previous.categories)?previous.categories:[];
+        const renameMap=new Map();
+        if(oldCategories.length===names.length) oldCategories.forEach((oldName,index)=>{
+          const nextName=names[index];
+          if(groupKey(oldName)!==groupKey(nextName))renameMap.set(groupKey(oldName),nextName);
+        });
         for(const row of this.rows('SELECT data,placed FROM products WHERE shipment=?',id)){
-          const p=JSON.parse(row.data);
-          if((!p.hidden||row.placed>0)&&p.group&&!names.some(n=>groupKey(n)===groupKey(p.group)))throw new ApiError(409,`В категории «${p.group}» есть товары. Сначала добавьте новую категорию и перенесите в неё товары через редактор каталога.`);
+          const p=JSON.parse(row.data),mapped=renameMap.get(groupKey(p.group));
+          if(mapped){p.group=mapped;this.sql.exec('UPDATE products SET data=? WHERE shipment=? AND id=?',JSON.stringify(p),id,p.id);}
+          if((!p.hidden||row.placed>0)&&p.group&&!names.some(n=>groupKey(n)===groupKey(p.group)))throw new ApiError(409,`В категории «${p.group}» есть товары. Сначала переименуйте её или перенесите товары.`);
         }
       }
       const brand={id:id||'brand-'+crypto.randomUUID(),name,categories:names,cover,hidden:input.hidden,revision:(previous?.revision||0)+1};
