@@ -206,7 +206,7 @@ export class Inventory {
       const shipmentIds=[...catalogs.keys()],shipmentId=shipmentIds.length===1?shipmentIds[0]:'mixed';
       const data={id:crypto.randomUUID(),shipmentId,shipmentIds,shipmentTitle:[...catalogs.values()].join(' + '),user,lines:detailed,comment,status:'placed',revision:1,createdAt:new Date().toISOString(),total:detailed.reduce((sum,l)=>sum+l.price*l.quantity,0)};
       if(!Number.isSafeInteger(data.total))throw new ApiError(400,'Слишком большая сумма.');
-      if(input.enforceMinimum===true && data.total<MIN_ORDER)throw new ApiError(400,'Минимальный заказ от 10.000 рублей.');
+      if(input.enforceMinimum===true && detailed.some(l=>l.wholesale) && data.total<MIN_ORDER)throw new ApiError(400,'Минимальный заказ от 10.000 рублей.');
       for(const l of detailed)this.sql.exec('UPDATE products SET placed=placed+? WHERE shipment=? AND id=?',l.quantity,l.shipmentId??shipmentId,l.id);
       this.sql.exec('INSERT INTO orders(id,user_id,request_key,fingerprint,shipment,status,data) VALUES(?,?,?,?,?,?,?)',data.id,user.id,input.requestKey,fingerprint,shipmentId,data.status,JSON.stringify(data));
       this.enqueue(data,'created');return data;
@@ -248,7 +248,7 @@ export class Inventory {
       const shipmentIds=[...catalogs.keys()],shipmentId=shipmentIds.length===1?shipmentIds[0]:'mixed';
       const data={...previous,shipmentId,shipmentIds,shipmentTitle:[...catalogs.values()].join(' + '),lines:detailed,comment,status:row.status,revision:revision+1,editedAt:new Date().toISOString(),total:detailed.reduce((sum,l)=>sum+l.price*l.quantity,0)};
       if(!Number.isSafeInteger(data.total))throw new ApiError(400,'Слишком большая сумма.');
-      if(input.enforceMinimum===true && data.total<MIN_ORDER)throw new ApiError(400,'Минимальный заказ от 10.000 рублей.');
+      if(input.enforceMinimum===true && detailed.some(l=>l.wholesale) && data.total<MIN_ORDER)throw new ApiError(400,'Минимальный заказ от 10.000 рублей.');
       const next=new Map(detailed.map(l=>[lineKey(l),l]));
       for(const key of new Set([...old.keys(),...next.keys()])) {
         const l=next.get(key)||old.get(key),delta=(next.get(key)?.quantity||0)-(old.get(key)?.quantity||0);
