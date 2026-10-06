@@ -75,6 +75,31 @@ export class Inventory {
       return brand;
     });
   }
+  updatePrices(id, updates) {
+    if(!validId(id)||!Array.isArray(updates)||!updates.length||updates.length>3000)throw new ApiError(400,'Укажите товары и цены.');
+    const seen=new Set();
+    return this.transaction(()=>{
+      if(!this.brand(id))throw new ApiError(404,'Бренд не найден.');
+      for(const change of updates){
+        const productId=trim(change?.id,120);
+        if(!productId||seen.has(productId))throw new ApiError(400,'В списке есть дублирующиеся товары.');
+        seen.add(productId);
+        const row=this.one('SELECT data FROM products WHERE shipment=? AND id=?',id,productId);
+        if(!row)throw new ApiError(404,'Товар не найден.');
+        const product=JSON.parse(row.data);
+        if(change.prices!==undefined){
+          if(!validPrices(change.prices))throw new ApiError(400,`${product.sku||product.id}: укажите три корректные цены.`);
+          product.prices=change.prices.map(Number);product.price=product.prices[0];
+        } else {
+          const price=Number(change.price);
+          if(!Number.isSafeInteger(price)||price<0||price>100000000)throw new ApiError(400,`${product.sku||product.id}: некорректная цена.`);
+          delete product.prices;product.price=price;
+        }
+        this.sql.exec('UPDATE products SET data=? WHERE shipment=? AND id=?',JSON.stringify(product),id,productId);
+      }
+      return {updated:updates.length};
+    });
+  }
   catalog(admin=false) {
     return this.rows('SELECT data FROM shipments').map(r=>JSON.parse(r.data)).filter(s=>this.brand(s.id) && (admin || !this.brand(s.id).hidden&&s.status !== 'draft')).map(s=>{
       const groups=s.groupingMode==='manual'?(s.groups||[]):[];
