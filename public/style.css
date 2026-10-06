@@ -91,11 +91,13 @@
 .brand-cover{width:100%;height:100%;object-fit:contain}.brand-name{max-width:calc(100% - 16px);white-space:normal;overflow-wrap:anywhere}.brand-actions{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end}.admin-brand-cover{display:block;width:64px;height:56px;object-fit:contain;margin-bottom:8px}.brand-cover-preview{display:block;width:100%;max-height:180px;object-fit:contain;margin:12px 0}.checkbox-field{display:flex;align-items:center;gap:10px}.checkbox-field input{width:20px;min-height:20px;margin:0;flex-shrink:0}.category-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.admin-row>div{min-width:0}.admin-row strong,.admin-row small{overflow-wrap:anywhere}
 @media(max-width:480px){.brand-actions{flex-direction:column;flex-shrink:0}.brand-actions button{font-size:12px;padding:11px 10px}.admin-panel{padding:16px}.admin-row{align-items:flex-start}}
 .category-card strong{overflow-wrap:anywhere}
+.price-edit-grid{display:grid;grid-template-columns:repeat(3,minmax(70px,1fr));gap:5px}.price-edit-grid input{min-width:0;padding:8px 5px;font-size:12px}
 @media(max-width:380px){.category-grid.count-3{grid-template-columns:repeat(2,minmax(0,1fr))}}
 
 /* Remax glass categories: a taller panel with a fixed coloured reflection. */
 [data-category-brand="remax"] .category-card{--glass-glint:#5C768D;min-height:174px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;overflow:hidden;isolation:isolate;border:1px solid #ffffff;border-radius:20px;background:linear-gradient(145deg,#ffffffed 0%,#ffffffe0 42%,#ffffff70 100%);box-shadow:inset 0 0 0 1px #2D293310,inset 0 2px 2px #fff,0 10px 24px #3427470d}
-[data-category-brand="remax"] [data-category="GL-27 Privacy"]{--glass-glint:#B3F0C7}
+[data-category-brand="remax"] [data-category="GL-27"]{background:linear-gradient(145deg,#ffffff55 0%,#ffffff18 40%,#ffffff08 100%),#5C768D}
+[data-category-brand="remax"] :is([data-category="GL-27 Privacy"],[data-category="GL-27 Антишпион"]){--glass-glint:#B3F0C7}
 [data-category-brand="remax"] [data-category="ES-01"]{--glass-glint:#F0C7B3}
 [data-category-brand="remax"] .category-card::before{content:"";position:absolute;inset:0;z-index:-2;background:radial-gradient(ellipse at 100% 100%,var(--glass-glint) 0%,transparent 70%),linear-gradient(135deg,transparent 20%,var(--glass-glint) 150%);opacity:.8;pointer-events:none}
 [data-category-brand="remax"] .category-card::after{content:"";position:absolute;inset:0;z-index:-1;background:linear-gradient(125deg,transparent 12%,#ffffff45 24%,#fffffff0 26%,#ffffff75 28%,transparent 42%,transparent 71%,#ffffffb3 72%,transparent 74%);box-shadow:inset 1px 1px 0 #fff,inset -1px -1px 0 #ffffffb3;border-radius:inherit;pointer-events:none}
@@ -107,7 +109,7 @@
 .topbar-actions{display:flex;align-items:center;gap:8px;flex-shrink:0}.contact-button{display:inline-flex;align-items:center;justify-content:center;min-height:36px;padding:8px 12px;border:1px solid var(--line);border-radius:12px;background:var(--accent);color:var(--primary-ink);font-size:12px;font-weight:600;text-decoration:none;white-space:nowrap}.contact-button:hover{background:var(--primary)}
 
 /* Square category tiles, with the Remax glass finish preserved. */
-.category-grid .category-card:is([data-category="Оригинал"],[data-category="Копия"],[data-category="GL-27"],[data-category="GL-27 Privacy"],[data-category="ES-01"],[data-category="Cases" i],[data-category="Bags" i]){width:100%;min-width:0;min-height:0;aspect-ratio:1/1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center}
+.category-grid .category-card:is([data-category="Оригинал"],[data-category="Копия"],[data-category="GL-27"],[data-category="GL-27 Privacy"],[data-category="GL-27 Антишпион"],[data-category="ES-01"],[data-category="Cases" i],[data-category="Bags" i]){width:100%;min-width:0;min-height:0;aspect-ratio:1/1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center}
 .category-grid .category-card:is([data-category="Оригинал"],[data-category="Cases" i]){background:#B3F0C7}
 .category-grid .category-card:is([data-category="Копия"],[data-category="Bags" i]){background:#F0C7B3}
 .category-grid .category-card:is([data-category="Оригинал"],[data-category="Копия"],[data-category="Cases" i],[data-category="Bags" i]){--frost:#B3F0C7;overflow:hidden;isolation:isolate;border:1px solid #ffffffd9;background:linear-gradient(145deg,#ffffff8c,#ffffff20),var(--frost);box-shadow:inset 0 0 24px #ffffff80,inset 0 1px 0 #fff,0 7px 20px #2D29330c;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
