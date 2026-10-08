@@ -24,8 +24,15 @@ function toast(message){$('#toast').textContent=message;$('#toast').hidden=false
 function badge(status){return `<span class="badge ${esc(status)}">${esc(statuses[status]||status)}</span>`;}
 function notice(text){$('#notice').textContent=text;$('#notice').hidden=!text;}
 async function api(path,method='GET',body){
-  const response=await fetch('/api'+path,{method,headers:{'Content-Type':'application/json','X-Telegram-Init-Data':tg?.initData||''},...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(25000)});
-  const data=await response.json();
+  const savingBrand=method!=='GET'&&/^\/admin\/brands(?:\/[^/]+)?$/.test(path);
+  let response,data;
+  try{
+    response=await fetch('/api'+path,{method,headers:{'Content-Type':'application/json','X-Telegram-Init-Data':tg?.initData||''},...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(savingBrand?120000:25000)});
+    data=await response.json();
+  }catch(error){
+    if(error.name==='AbortError'||error.name==='TimeoutError')throw Error(savingBrand?'Сервер не ответил вовремя. Закройте настройки и откройте их заново, чтобы проверить, сохранились ли изменения.':'Сервер не ответил вовремя. Проверьте подключение и попробуйте снова.');
+    throw error;
+  }
   if(!response.ok){const error=Error(data.error||'Не удалось выполнить запрос.');error.status=response.status;throw error;}
   if(path==='/catalog'&&Array.isArray(data.brands))state.brands=data.brands;
   return data;
@@ -372,7 +379,17 @@ function editBrand(brand=null){
     const categories=categoryNames(),categoryCovers=Object.fromEntries(categories.filter(name=>categoryImages.has(name)).map(name=>[name,categoryImages.get(name)])),button=$('#save-brand');button.disabled=true;
     try{
       const {brand:saved}=await api('/admin/brands'+(brand?'/'+brand.id:''),brand?'PATCH':'POST',{name:$('#brand-name').value,categories,cover,categoryCovers,hidden:brand?!$('#brand-visible').checked:true,...(brand?{expectedRevision:brand.revision}:{})});
-      state.shipments=(await api('/catalog')).shipments;closeDialog();render();
+      const index=state.brands.findIndex(item=>item.id===saved.id);
+      if(index<0)state.brands.push(saved);else state.brands[index]=saved;
+      const catalog=catalogForBrand(saved.id);
+      if(catalog){
+        if(brand?.categories.length===saved.categories.length){
+          const renames=new Map(brand.categories.map((name,index)=>[groupKey(name),saved.categories[index]]));
+          catalog.products.forEach(product=>{const name=renames.get(groupKey(product.group));if(name)product.group=name;});
+        }
+        Object.assign(catalog,{title:saved.name,brand:saved.name,brandInfo:saved,groups:saved.categories,hidden:saved.hidden});
+      }
+      closeDialog();render();
       if(!brand)editShipment(null,saved);else toast('Настройки бренда сохранены.');
     }catch(error){if(form.isConnected){$('#brand-error').textContent=error.message;button.disabled=false;}else toast(error.message);}
   };
