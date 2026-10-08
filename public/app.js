@@ -135,15 +135,28 @@ function render(){
   cartBar();
   if(tg?.BackButton){if(state.view==='shipments'&&state.current){tg.BackButton.show();}else{tg.BackButton.hide();}}
 }
+
+function searchBox(value=state.search){return `<div class="toolbar home-search"><input class="search" type="search" id="catalog-search" placeholder="Поиск товара или бренда" aria-label="Поиск товара или бренда" value="${esc(value)}"></div>`;}
+function searchResultsMarkup(query){
+  const found=searchCatalog(state.shipments,query),controls=query?sortingControls(found.map(m=>m.product)):'';
+  const matches=filteredProducts(found.map(m=>({...m.product,brand:m.brand}))).map(product=>({brand:product.brand,product}));
+  return `${controls}<div class="section-header"><h2>Найдено товаров: ${matches.length}</h2></div>${matches.length?`<div class="search-products">${matches.slice(0,100).map(({brand,product:p},index)=>`<button class="search-product" data-search-result="${index}">${photo(p)}<span><small>${esc(brand.name)} · ${esc(p.group)} · ${esc(p.sku)}</small><strong>${esc(p.name)}</strong><span class="price">${money(displayPrice(p,brand))}</span></span></button>`).join('')}</div>${matches.length>100?'<p class="fine-print">Показаны первые 100 товаров. Уточните запрос.</p>':''}`:'<p class="empty">Ничего не найдено. Попробуйте другое название, модель или артикул.</p>'}`;
+}
+function bindCatalogSearch(redraw){const input=$('#catalog-search');if(input)input.oninput=debounce(event=>{if(event.target.isConnected){state.search=event.target.value;redraw();}});}
+function bindSearchResults(){
+  const found=searchCatalog(state.shipments,state.search.trim());
+  const matches=filteredProducts(found.map(m=>({...m.product,brand:m.brand}))).map(product=>({brand:product.brand,product}));
+  bindSorting(()=>render());
+  document.querySelectorAll('[data-search-result]').forEach(button=>button.onclick=()=>{const {brand,product}=matches[Number(button.dataset.searchResult)];openShipment(brand.id);state.productGroup=product.group;render();$('#product-search').value=product.sku;products(product.sku);});
+}
+
 function renderShipments(){
-  app.innerHTML=`<div class="toolbar home-search"><input class="search" type="search" id="catalog-search" placeholder="Поиск товара или бренда" aria-label="Поиск товара или бренда" value="${esc(state.search)}"></div><div class="page-heading"><div><p class="eyebrow">EL / STORE</p><h1>Товары</h1><p class="subtitle">Выберите бренд или найдите товар в поиске.</p></div><span class="count">Брендов: ${visibleBrands().length}</span></div><div class="brand-grid" id="shipment-grid"></div><section id="search-results" aria-label="Результаты поиска" hidden></section>`;
-  $('#catalog-search').oninput=debounce(event=>{if(event.target.isConnected){state.search=event.target.value;cards();}});
+  app.innerHTML=`${searchBox()}<div class="page-heading compact-heading"><span class="count">Брендов: ${visibleBrands().length}</span></div><div class="brand-grid" id="shipment-grid"></div><section id="search-results" aria-label="Результаты поиска" hidden></section>`;
+  bindCatalogSearch(cards);
   cards();
 }
 function cards(){
-  const query=state.search.trim(),found=searchCatalog(state.shipments,query);
-  const controls=query?sortingControls(found.map(m=>m.product)):'';
-  const matches=filteredProducts(found.map(m=>({...m.product,brand:m.brand}))).map(product=>({brand:product.brand,product}));
+  const query=state.search.trim();
   const list=visibleBrands().map(brand=>({brand,catalog:catalogForBrand(brand.id)}));
   $('#shipment-grid').innerHTML=list.map(({brand,catalog})=>{
     const available=sellableProducts(catalog),examples=available.filter(p=>p.image||p.imageKey).slice(0,2);
@@ -152,13 +165,8 @@ function cards(){
   }).join('');
   document.querySelectorAll('[data-brand]').forEach(button=>button.onclick=()=>openShipment(button.dataset.brand));
   const results=$('#search-results');results.hidden=!query;
-  results.innerHTML=query?`${controls}<div class="section-header"><h2>Найдено товаров: ${matches.length}</h2></div>${matches.length?`<div class="search-products">${matches.slice(0,100).map(({brand,product:p},index)=>`<button class="search-product" data-search-result="${index}">${photo(p)}<span><small>${esc(brand.name)} · ${esc(p.group)} · ${esc(p.sku)}</small><strong>${esc(p.name)}</strong><span class="price">${money(displayPrice(p,brand))}</span></span></button>`).join('')}</div>${matches.length>100?'<p class="fine-print">Показаны первые 100 товаров. Уточните запрос.</p>':''}`:'<p class="empty">Ничего не найдено. Попробуйте другое название, модель или артикул.</p>'}`:'';
-  bindSorting(cards);
-  results.querySelectorAll('[data-search-result]').forEach(button=>button.onclick=()=>{
-    const {brand,product}=matches[Number(button.dataset.searchResult)];
-    openShipment(brand.id);state.productGroup=product.group;render();
-    $('#product-search').value=product.sku;products(product.sku);
-  });
+  results.innerHTML=query?searchResultsMarkup(query):'';
+  if(query)bindSearchResults();
   list.forEach(({catalog})=>catalog&&loadImages({...catalog,products:sellableProducts(catalog)}));
 }
 function openShipment(id){if(state.current!==id){state.productGroup='';state.phoneModel='';}state.current=id;state.view='shipments';render();window.scrollTo(0,0);}
@@ -183,15 +191,17 @@ function renderDetail(){
   const categories=brand?.categories||[],visible=sellableProducts(s);
   if(!categories.some(name=>groupKey(name)===groupKey(state.productGroup)))state.productGroup='';
   if(!state.productGroup){
-    app.innerHTML=`<button class="back" id="back">← Бренды</button><section class="detail-head"><p class="eyebrow">КАТАЛОГ</p><h1>${esc(brand?.name||s.brand||s.title)}</h1><p class="subtitle">Выберите категорию.</p></section><div class="category-grid count-${categories.length}" data-category-brand="${esc(s.id)}">${categories.map(name=>{const count=visible.filter(p=>groupKey(p.group)===groupKey(name)).length;const customCover=brand?.categoryCovers&&Object.hasOwn(brand.categoryCovers,name)?brand.categoryCovers[name]:null,series=groupKey(brand?.name||s.brand||s.title)==='iphone'?iphoneSeriesCovers[groupKey(name)]:null,builtIn=builtInCategoryCovers[groupKey(name)],cover=customCover||(series?`./images/series/${series}.webp`:builtIn?`./images/categories/${builtIn}.webp`:null);return `<button class="category-card${cover?' category-with-cover':''}" data-category="${esc(name)}" aria-label="${esc(name)}">${cover?`<img class="category-cover" src="${esc(cover)}" alt="" width="800" height="1067" loading="lazy">`: ''}${cover&&!customCover?'':`<strong>${esc(name)}</strong>`}<span>${count} товаров</span></button>`;}).join('')}</div>`;
-    $('#back').onclick=goBack;
+    const query=state.search.trim();
+    const categoryCards=`<section class="detail-head"><h1>${esc(brand?.name||s.brand||s.title)}</h1></section><div class="category-grid count-${categories.length}" data-category-brand="${esc(s.id)}">${categories.map(name=>{const count=visible.filter(p=>groupKey(p.group)===groupKey(name)).length;const customCover=brand?.categoryCovers&&Object.hasOwn(brand.categoryCovers,name)?brand.categoryCovers[name]:null,series=groupKey(brand?.name||s.brand||s.title)==='iphone'?iphoneSeriesCovers[groupKey(name)]:null,builtIn=builtInCategoryCovers[groupKey(name)],cover=customCover||(series?`./images/series/${series}.webp`:builtIn?`./images/categories/${builtIn}.webp`:null);return `<button class="category-card${cover?' category-with-cover':''}" data-category="${esc(name)}" aria-label="${esc(name)}">${cover?`<img class="category-cover" src="${esc(cover)}" alt="" width="800" height="1067" loading="lazy">`: ''}${cover&&!customCover?'':`<strong>${esc(name)}</strong>`}<span>${count} товаров</span></button>`;}).join('')}</div>`;
+    app.innerHTML=`<button class="back" id="back">← Бренды</button>${searchBox()}${query?`<section id="search-results" aria-label="Результаты поиска">${searchResultsMarkup(query)}</section>`:categoryCards}`;
+    $('#back').onclick=goBack;bindCatalogSearch(renderDetail);if(query)bindSearchResults();
     document.querySelectorAll('[data-category]').forEach(button=>button.onclick=()=>{state.productGroup=button.dataset.category;state.phoneModel='';render();window.scrollTo(0,0);});
     loadImages({...s,products:visible});
     return;
   }
   const category=categories.find(name=>groupKey(name)===groupKey(state.productGroup))||state.productGroup;
   const count=visible.filter(p=>groupKey(p.group)===groupKey(category)).length;
-  app.innerHTML=`<button class="back" id="back">← ${esc(brand?.name||'Категории')}</button><section class="detail-head category-heading"><div class="category-heading-title"><p class="eyebrow">${esc(brand?.name||s.brand||s.title)}</p><h1>${esc(category)}</h1></div><div class="detail-meta"><span>В продаже<strong>${count} позиций</strong></span></div></section><div class="toolbar"><input class="search" type="search" id="product-search" placeholder="Название, модель или артикул" aria-label="Поиск товара"></div>${sortingControls(visible.filter(p=>groupKey(p.group)===groupKey(category)))}<div id="products"></div>`;
+  app.innerHTML=`<button class="back" id="back">← ${esc(brand?.name||'Категории')}</button><section class="detail-head category-heading"><div class="category-heading-title"><h1>${esc(category)}</h1></div><div class="detail-meta"><span>В продаже<strong>${count} позиций</strong></span></div></section><div class="toolbar home-search"><input class="search" type="search" id="product-search" placeholder="Поиск товара или бренда" aria-label="Поиск товара"></div>${sortingControls(visible.filter(p=>groupKey(p.group)===groupKey(category)))}<div id="products"></div>`;
   $('#product-search').oninput=debounce(e=>{if(e.target.isConnected)products(e.target.value);});
   bindSorting(()=>products($('#product-search').value));
   $('#back').onclick=goBack;products('');loadImages({...s,products:visible.filter(p=>groupKey(p.group)===groupKey(category))});
@@ -285,7 +295,7 @@ async function repeatOrder(order){
 }
 async function renderOrders(all=false){
   state.view=all?'all-orders':'orders';
-  app.innerHTML=`<div class="page-heading"><div><p class="eyebrow">EL / STORE</p><h1>${all?'Все заказы':'Мои заказы'}</h1></div>${all?'<button class="secondary" id="export">Excel ↓</button>':''}</div><div id="orders"><p class="empty">Загружаем…</p></div>`;
+  app.innerHTML=`<div class="page-heading"><div><h1>${all?'Все заказы':'Мои заказы'}</h1></div>${all?'<button class="secondary" id="export">Excel ↓</button>':''}</div><div id="orders"><p class="empty">Загружаем…</p></div>`;
   if(!all && !state.preview && state.user)$('#orders').insertAdjacentHTML('beforebegin',`<p class="muted">Заказы привязаны к вашему Telegram-аккаунту.</p>`);
   if(state.preview){$('#orders').innerHTML='<div class="empty"><strong>Здесь будут ваши заказы</strong>Отправка появится после подключения бота и рабочего канала.</div>';return;}
   const container=$('#orders');
@@ -345,7 +355,7 @@ function changeOrder(id,status,all){
 }
 function renderAdmin(){
   if(!state.admin){state.view='shipments';render();return;}
-  app.innerHTML=`<div class="page-heading"><div><p class="eyebrow">EL / STORE</p><h1>Управление</h1><p class="subtitle">Создавайте бренды и категории, загружайте товары из Excel.</p></div></div><div class="actions"><button class="primary" id="add-brand">+ Добавить бренд</button><button class="secondary" id="all-orders">Все заказы</button><button class="secondary" id="setup-bot">Подключить бота</button><button class="secondary" id="notification-settings">Уведомления в канал</button></div><section class="admin-panel">${state.brands.map(brand=>{const catalog=catalogForBrand(brand.id),count=catalog?.products.filter(p=>!p.hidden&&p.stock>0).length||0;return `<div class="admin-row"><div>${brand.cover?`<img class="admin-brand-cover" src="${esc(brand.cover)}" alt="">`:''}<strong>${esc(brand.name)}</strong><small>${brand.hidden?'Скрыт от покупателей':'Показывается покупателям'}</small><small>${brand.categories.map(esc).join(' · ')}</small><small>${count} товаров${catalog?'':' · Excel ещё не загружен'}</small></div><div class="brand-actions">${catalog?`<button class="secondary" data-brand-prices="${esc(brand.id)}">Цены</button>`:''}<button class="primary" data-brand-import="${esc(brand.id)}">${catalog?'Обновить Excel':'Загрузить Excel'}</button><button class="secondary" data-brand-edit="${esc(brand.id)}">Настройки</button></div></div>`;}).join('')}</section>`;
+  app.innerHTML=`<div class="page-heading"><div><h1>Управление</h1></div></div><div class="actions"><button class="primary" id="add-brand">+ Добавить бренд</button><button class="secondary" id="all-orders">Все заказы</button><button class="secondary" id="setup-bot">Подключить бота</button><button class="secondary" id="notification-settings">Уведомления в канал</button></div><section class="admin-panel">${state.brands.map(brand=>{const catalog=catalogForBrand(brand.id),count=catalog?.products.filter(p=>!p.hidden&&p.stock>0).length||0;return `<div class="admin-row"><div>${brand.cover?`<img class="admin-brand-cover" src="${esc(brand.cover)}" alt="">`:''}<strong>${esc(brand.name)}</strong><small>${brand.hidden?'Скрыт от покупателей':'Показывается покупателям'}</small><small>${brand.categories.map(esc).join(' · ')}</small><small>${count} товаров${catalog?'':' · Excel ещё не загружен'}</small></div><div class="brand-actions">${catalog?`<button class="secondary" data-brand-prices="${esc(brand.id)}">Цены</button>`:''}<button class="primary" data-brand-import="${esc(brand.id)}">${catalog?'Обновить Excel':'Загрузить Excel'}</button><button class="secondary" data-brand-edit="${esc(brand.id)}">Настройки</button></div></div>`;}).join('')}</section>`;
   $('#add-brand').onclick=()=>editBrand();
   $('#all-orders').onclick=()=>{state.view='all-orders';render();};
   $('#setup-bot').onclick=showBotSetup;
