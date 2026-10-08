@@ -14,6 +14,11 @@ const date=s=>s?new Date(s.length===10?s+'T12:00:00':s).toLocaleDateString('ru-R
 const statuses={draft:'Скрыт',arrived:'В продаже',closed:'Продажа закрыта',placed:'Оформлен',confirmed:'Подтверждён',cancelled:'Отменён'};
 const brandById=id=>state.brands.find(b=>b.id===id);
 const visibleBrands=()=>state.brands.filter(b=>!b.hidden);
+const builtInBrandCovers={apple:'apple',remax:'remax',iphone:'iphone',ipad:'ipad',macbook:'macbook'};
+const builtInBrandCover=brand=>{
+  const key=[brand?.id,brand?.name].map(groupKey).find(value=>builtInBrandCovers[value]);
+  return key?`./images/brands/${builtInBrandCovers[key]}.webp`:null;
+};
 const catalogForBrand=id=>state.shipments.find(s=>s.id===id);
 const sellableProducts=catalog=>(catalog?.status==='arrived'&&!catalog.hidden?catalog.products:[]).filter(p=>!p.hidden&&p.stock>0);
 const state={preview:false,admin:false,ready:false,view:'shipments',brands:[...DEFAULT_BRANDS],shipments:[],current:null,sort:'new',search:'',cart:{},images:{},orders:[],productGroup:'',phoneModel:'',comment:'',pendingOrder:null,cartChanges:[]};
@@ -135,7 +140,8 @@ function cards(){
   const list=visibleBrands().map(brand=>({brand,catalog:catalogForBrand(brand.id)}));
   $('#shipment-grid').innerHTML=list.map(({brand,catalog})=>{
     const available=sellableProducts(catalog),examples=available.filter(p=>p.image||p.imageKey).slice(0,2);
-    return `<article class="brand-card"><button class="brand-open" data-brand="${esc(brand.id)}"><div class="brand-visual${brand.cover||examples.length?' has-photo':''}">${brand.cover?`<img class="brand-cover" src="${esc(brand.cover)}" alt="${esc(brand.name)}" loading="lazy">`:examples.map(p=>photo(p,'cover-photo')).join('')}${brand.cover?'':`<span class="brand-name">${esc(brand.name)}</span>`}</div><div class="brand-card-footer"><span>${available.length} товаров</span></div></button></article>`;
+    const cover=brand.cover||builtInBrandCover(brand);
+    return `<article class="brand-card"><button class="brand-open" data-brand="${esc(brand.id)}"><div class="brand-visual${cover||examples.length?' has-photo':''}">${cover?`<img class="brand-cover" src="${esc(cover)}" alt="${esc(brand.name)}" loading="lazy">`:examples.map(p=>photo(p,'cover-photo')).join('')}${cover?'':`<span class="brand-name">${esc(brand.name)}</span>`}</div><div class="brand-card-footer"><span>${available.length} товаров</span></div></button></article>`;
   }).join('');
   document.querySelectorAll('[data-brand]').forEach(button=>button.onclick=()=>openShipment(button.dataset.brand));
   const results=$('#search-results');results.hidden=!query;

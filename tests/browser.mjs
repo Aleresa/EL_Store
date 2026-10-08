@@ -60,14 +60,14 @@ try{
   await page.goto('http://localhost:4174');
   await page.waitForSelector('.brand-card');
   assert.equal(await page.locator('.brand-card').count(),2);
-  assert.deepEqual(await page.locator('.brand-name').allTextContents(),['Apple','Remax']);
+  assert.equal(await page.locator('.brand-cover').count(),2);
   assert.equal(await page.locator('[data-view="shipments"]').textContent(),'Товары');
   assert.equal(await page.locator('#admin-tab').textContent(),'Управление');
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
 
   await page.evaluate(()=>document.fonts.ready);
   assert.equal(await page.evaluate(()=>document.fonts.check('16px Inter')),true);
-  assert.equal(await page.locator('.brand-visual').first().evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(199, 179, 240)');
+  assert.equal(await page.locator('.brand-visual').first().evaluate(el=>getComputedStyle(el).backgroundColor),'rgba(0, 0, 0, 0)');
   assert.equal(await page.locator('body').evaluate(el=>getComputedStyle(el).color),'rgb(45, 41, 51)');
   const brandBoxes=await page.locator('.brand-card').evaluateAll(elements=>elements.map(el=>({x:el.getBoundingClientRect().x,y:el.getBoundingClientRect().y})));
   assert.equal(brandBoxes[0].y,brandBoxes[1].y);assert(brandBoxes[1].x>brandBoxes[0].x);
