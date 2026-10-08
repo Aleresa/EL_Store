@@ -14,10 +14,17 @@ const date=s=>s?new Date(s.length===10?s+'T12:00:00':s).toLocaleDateString('ru-R
 const statuses={draft:'Скрыт',arrived:'В продаже',closed:'Продажа закрыта',placed:'Оформлен',confirmed:'Подтверждён',cancelled:'Отменён'};
 const brandById=id=>state.brands.find(b=>b.id===id);
 const visibleBrands=()=>state.brands.filter(b=>!b.hidden);
-const builtInBrandCovers={apple:'apple',remax:'remax',iphone:'iphone',ipad:'ipad',macbook:'macbook'};
+const builtInBrandCovers=[
+  ['macbook','macbook'],
+  ['iphone','iphone'],
+  ['ipad','ipad'],
+  ['remax','remax'],
+  ['apple','apple']
+];
 const builtInBrandCover=brand=>{
-  const key=[brand?.id,brand?.name].map(groupKey).find(value=>builtInBrandCovers[value]);
-  return key?`./images/brands/${builtInBrandCovers[key]}.webp`:null;
+  const text=groupKey([brand?.id,brand?.name].filter(Boolean).join(' '));
+  const match=builtInBrandCovers.find(([key])=>text.includes(key));
+  return match?`./images/brands/${match[1]}.webp`:null;
 };
 const catalogForBrand=id=>state.shipments.find(s=>s.id===id);
 const sellableProducts=catalog=>(catalog?.status==='arrived'&&!catalog.hidden?catalog.products:[]).filter(p=>!p.hidden&&p.stock>0);
@@ -140,7 +147,7 @@ function cards(){
   const list=visibleBrands().map(brand=>({brand,catalog:catalogForBrand(brand.id)}));
   $('#shipment-grid').innerHTML=list.map(({brand,catalog})=>{
     const available=sellableProducts(catalog),examples=available.filter(p=>p.image||p.imageKey).slice(0,2);
-    const cover=brand.cover||builtInBrandCover(brand);
+    const cover=builtInBrandCover(brand)||brand.cover;
     return `<article class="brand-card"><button class="brand-open" data-brand="${esc(brand.id)}"><div class="brand-visual${cover||examples.length?' has-photo':''}">${cover?`<img class="brand-cover" src="${esc(cover)}" alt="${esc(brand.name)}" loading="lazy">`:examples.map(p=>photo(p,'cover-photo')).join('')}${cover?'':`<span class="brand-name">${esc(brand.name)}</span>`}</div><div class="brand-card-footer"><span>${available.length} товаров</span></div></button></article>`;
   }).join('');
   document.querySelectorAll('[data-brand]').forEach(button=>button.onclick=()=>openShipment(button.dataset.brand));
