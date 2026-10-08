@@ -68,7 +68,19 @@ export class Inventory {
           if((!p.hidden||row.placed>0)&&p.group&&!names.some(n=>groupKey(n)===groupKey(p.group)))throw new ApiError(409,`В категории «${p.group}» есть товары. Сначала переименуйте её или перенесите товары.`);
         }
       }
-      const brand={id:id||'brand-'+crypto.randomUUID(),name,categories:names,cover,hidden:input.hidden,revision:(previous?.revision||0)+1};
+      const supplied=input.categoryCovers;
+      if(supplied!==undefined&&(supplied===null||typeof supplied!=='object'||Array.isArray(supplied)||Object.keys(supplied).some(key=>!names.includes(key))))throw new ApiError(400,'Укажите обложки существующих категорий.');
+      const categoryCovers=Object.create(null);
+      names.forEach((category,index)=>{
+        const oldName=previous?.categories?.length===names.length&&!previous.categories.includes(category)?previous.categories[index]:category;
+        const image=supplied===undefined?previous?.categoryCovers?.[oldName]:Object.hasOwn(supplied,category)?supplied[category]:null;
+        if(image!=null){
+          if(typeof image!=='string'||!/^data:image\/(webp|png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(image)||image.length>350000)throw new ApiError(400,'Обложка категории слишком большая или имеет неверный формат.');
+          categoryCovers[category]=image;
+        }
+      });
+      if(Object.values(categoryCovers).reduce((total,image)=>total+image.length,cover?.length||0)>14000000)throw new ApiError(400,'Обложки слишком большие. Уменьшите размер изображений.');
+      const brand={id:id||'brand-'+crypto.randomUUID(),name,categories:names,cover,categoryCovers,hidden:input.hidden,revision:(previous?.revision||0)+1};
       this.sql.exec('INSERT INTO brands(id,data) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data',brand.id,JSON.stringify(brand));
       const shipment=this.one('SELECT data FROM shipments WHERE id=?',brand.id);
       if(shipment){const data={...JSON.parse(shipment.data),title:name,brand:name,groups:names};this.sql.exec('UPDATE shipments SET data=? WHERE id=?',JSON.stringify(data),brand.id);}

@@ -149,7 +149,7 @@ function renderDetail(){
   const categories=brand?.categories||[],visible=sellableProducts(s);
   if(!categories.some(name=>groupKey(name)===groupKey(state.productGroup)))state.productGroup='';
   if(!state.productGroup){
-    app.innerHTML=`<button class="back" id="back">← Бренды</button><section class="detail-head"><p class="eyebrow">КАТАЛОГ</p><h1>${esc(brand?.name||s.brand||s.title)}</h1><p class="subtitle">Выберите категорию.</p></section><div class="category-grid count-${categories.length}" data-category-brand="${esc(s.id)}">${categories.map(name=>{const count=visible.filter(p=>groupKey(p.group)===groupKey(name)).length;const cover=groupKey(brand?.name||s.brand||s.title)==='iphone'?iphoneSeriesCovers[groupKey(name)]:null;return `<button class="category-card${cover?' category-with-cover':''}" data-category="${esc(name)}" aria-label="${esc(name)}">${cover?`<img class="category-cover" src="./images/series/${cover}.webp" alt="" width="800" height="1067" loading="lazy">`: ''}${cover?'':`<strong>${esc(name)}</strong>`}<span>${count} товаров</span></button>`;}).join('')}</div>`;
+    app.innerHTML=`<button class="back" id="back">← Бренды</button><section class="detail-head"><p class="eyebrow">КАТАЛОГ</p><h1>${esc(brand?.name||s.brand||s.title)}</h1><p class="subtitle">Выберите категорию.</p></section><div class="category-grid count-${categories.length}" data-category-brand="${esc(s.id)}">${categories.map(name=>{const count=visible.filter(p=>groupKey(p.group)===groupKey(name)).length;const customCover=brand?.categoryCovers&&Object.hasOwn(brand.categoryCovers,name)?brand.categoryCovers[name]:null,series=groupKey(brand?.name||s.brand||s.title)==='iphone'?iphoneSeriesCovers[groupKey(name)]:null,cover=customCover||(series?`./images/series/${series}.webp`:null);return `<button class="category-card${cover?' category-with-cover':''}" data-category="${esc(name)}" aria-label="${esc(name)}">${cover?`<img class="category-cover" src="${esc(cover)}" alt="" width="800" height="1067" loading="lazy">`: ''}${cover&&!customCover?'':`<strong>${esc(name)}</strong>`}<span>${count} товаров</span></button>`;}).join('')}</div>`;
     $('#back').onclick=goBack;
     document.querySelectorAll('[data-category]').forEach(button=>button.onclick=()=>{state.productGroup=button.dataset.category;state.phoneModel='';render();window.scrollTo(0,0);});
     loadImages({...s,products:visible});
@@ -334,22 +334,44 @@ async function coverFromFile(file){
   }finally{bitmap.close();}
 }
 function editBrand(brand=null){
-  let cover=brand?.cover||null,processing=false;
-  showDialog(brand?'Настройки бренда':'Добавить бренд',`<form id="brand-form"><label class="field">Название<input id="brand-name" required maxlength="80" value="${esc(brand?.name||'')}" placeholder="Например, Baseus"></label><label class="field">Категории — по одной на строку<textarea id="brand-categories" required rows="5" placeholder="Кабели&#10;Зарядные устройства&#10;Аккумуляторы">${esc(brand?.categories.join('\n')||'')}</textarea></label><label class="field">Обложка<input type="file" id="brand-cover-file" accept="image/png,image/jpeg,image/webp"></label><div id="brand-cover-preview"></div><button type="button" class="secondary" id="remove-brand-cover">Убрать обложку</button>${brand?`<label class="field checkbox-field"><input type="checkbox" id="brand-visible" ${brand.hidden?'':'checked'}> Показывать бренд покупателям</label><p class="fine-print">Скрытый бренд недоступен для новых заказов. Товары и история заказов сохраняются.</p>`:'<p class="fine-print">После создания загрузите Excel и опубликуйте бренд.</p>'}<p class="error" id="brand-error" role="alert"></p><button class="primary full" id="save-brand" type="submit">${brand?'Сохранить':'Создать и загрузить товары'}</button></form>`);
+  let cover=brand?.cover||null,processing=0;
+  const categoryImages=new Map(Object.entries(brand?.categoryCovers||{}));
+  let previousNames=brand?.categories||[];
+  showDialog(brand?'Настройки бренда':'Добавить бренд',`<form id="brand-form"><label class="field">Название<input id="brand-name" required maxlength="80" value="${esc(brand?.name||'')}" placeholder="Например, Baseus"></label><label class="field">Категории — по одной на строку<textarea id="brand-categories" required rows="5" placeholder="Кабели&#10;Зарядные устройства&#10;Аккумуляторы">${esc(brand?.categories.join('\n')||'')}</textarea></label><div id="category-covers"></div><label class="field">Обложка бренда<input type="file" id="brand-cover-file" accept="image/png,image/jpeg,image/webp"></label><div id="brand-cover-preview"></div><button type="button" class="secondary" id="remove-brand-cover">Убрать обложку</button>${brand?`<label class="field checkbox-field"><input type="checkbox" id="brand-visible" ${brand.hidden?'':'checked'}> Показывать бренд покупателям</label><p class="fine-print">Скрытый бренд недоступен для новых заказов. Товары и история заказов сохраняются.</p>`:'<p class="fine-print">После создания загрузите Excel и опубликуйте бренд.</p>'}<p class="error" id="brand-error" role="alert"></p><button class="primary full" id="save-brand" type="submit">${brand?'Сохранить':'Создать и загрузить товары'}</button></form>`);
   const form=$('#brand-form');
+  const categoryNames=()=>$('#brand-categories').value.split('\n').map(x=>x.trim().replace(/\s+/g,' ')).filter(Boolean);
+  const renderCategoryCovers=()=>{
+    const names=categoryNames();
+    if(previousNames.length===names.length&&!names.every(name=>previousNames.includes(name))){
+      const images=previousNames.map(name=>categoryImages.get(name));
+      previousNames.forEach(name=>categoryImages.delete(name));
+      names.forEach((name,index)=>{if(images[index])categoryImages.set(name,images[index]);});
+    }
+    previousNames=names;
+    $('#category-covers').innerHTML=`<p>Обложки категорий</p>${names.map((name,index)=>`<div class="category-cover-field"><label class="field">${esc(name)}<input type="file" data-category-cover="${index}" accept="image/png,image/jpeg,image/webp"></label><div data-category-preview="${index}">${categoryImages.get(name)?`<img class="brand-cover-preview" src="${esc(categoryImages.get(name))}" alt="Обложка ${esc(name)}">`:''}</div><button type="button" class="secondary" data-remove-category-cover="${index}" ${categoryImages.has(name)?'':'hidden'}>Убрать обложку</button></div>`).join('')}`;
+    form.querySelectorAll('[data-category-cover]').forEach(input=>input.onchange=async()=>{
+      const file=input.files[0],name=names[Number(input.dataset.categoryCover)];if(!file)return;
+      processing++;$('#brand-categories').disabled=true;$('#save-brand').disabled=true;$('#brand-error').textContent='';
+      try{const image=await coverFromFile(file);if(form.isConnected)categoryImages.set(name,image);}
+      catch(error){if(form.isConnected)$('#brand-error').textContent=error.message;}
+      finally{processing--;if(form.isConnected){$('#brand-categories').disabled=processing>0;$('#save-brand').disabled=processing>0;if(!processing)renderCategoryCovers();}}
+    });
+    form.querySelectorAll('[data-remove-category-cover]').forEach(button=>button.onclick=()=>{categoryImages.delete(names[Number(button.dataset.removeCategoryCover)]);renderCategoryCovers();});
+  };
+  $('#brand-categories').oninput=renderCategoryCovers;renderCategoryCovers();
   const preview=()=>{$('#brand-cover-preview').innerHTML=cover?`<img class="brand-cover-preview" src="${esc(cover)}" alt="Обложка бренда">`:'';$('#remove-brand-cover').hidden=!cover;};preview();
   $('#remove-brand-cover').onclick=()=>{cover=null;$('#brand-cover-file').value='';preview();};
   $('#brand-cover-file').onchange=async e=>{
-    const file=e.target.files[0];if(!file)return;processing=true;$('#save-brand').disabled=true;$('#brand-error').textContent='';
+    const file=e.target.files[0];if(!file)return;processing++;$('#brand-categories').disabled=true;$('#save-brand').disabled=true;$('#brand-error').textContent='';
     try{const image=await coverFromFile(file);if(form.isConnected){cover=image;preview();}}
     catch(error){if(form.isConnected)$('#brand-error').textContent=error.message;}
-    finally{processing=false;if(form.isConnected)$('#save-brand').disabled=false;}
+    finally{processing--;if(form.isConnected){$('#brand-categories').disabled=processing>0;$('#save-brand').disabled=processing>0;}}
   };
   form.onsubmit=async e=>{
     e.preventDefault();if(processing)return;
-    const categories=$('#brand-categories').value.split('\n').map(x=>x.trim()).filter(Boolean),button=$('#save-brand');button.disabled=true;
+    const categories=categoryNames(),categoryCovers=Object.fromEntries(categories.filter(name=>categoryImages.has(name)).map(name=>[name,categoryImages.get(name)])),button=$('#save-brand');button.disabled=true;
     try{
-      const {brand:saved}=await api('/admin/brands'+(brand?'/'+brand.id:''),brand?'PATCH':'POST',{name:$('#brand-name').value,categories,cover,hidden:brand?!$('#brand-visible').checked:true,...(brand?{expectedRevision:brand.revision}:{})});
+      const {brand:saved}=await api('/admin/brands'+(brand?'/'+brand.id:''),brand?'PATCH':'POST',{name:$('#brand-name').value,categories,cover,categoryCovers,hidden:brand?!$('#brand-visible').checked:true,...(brand?{expectedRevision:brand.revision}:{})});
       state.shipments=(await api('/catalog')).shipments;closeDialog();render();
       if(!brand)editShipment(null,saved);else toast('Настройки бренда сохранены.');
     }catch(error){if(form.isConnected){$('#brand-error').textContent=error.message;button.disabled=false;}else toast(error.message);}

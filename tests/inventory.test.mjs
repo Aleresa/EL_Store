@@ -421,3 +421,26 @@ test('category import rejects unknown categories and cross-category ID collision
   assert.throws(()=>inv.importShipment({...catalog,importCategory:'Копия',products:[catalog.products[0]]}),/другой категории/);
   assert.deepEqual(inv.catalog(true),before);
 });
+
+
+test('category covers persist, survive legacy settings and Excel, follow renames and can be removed',()=>{
+  const {inv,sql,txn,catalog}=fixture(),image='data:image/png;base64,aGVsbG8=';
+  const apple=inv.brand('apple');
+  const saved=inv.saveBrand({...apple,categoryCovers:{'Оригинал':image},expectedRevision:apple.revision},apple.id);
+  assert.equal(inv.catalog()[0].brandInfo.categoryCovers['Оригинал'],image);
+  assert.equal(new Inventory(sql,txn).brand('apple').categoryCovers['Оригинал'],image);
+  inv.importShipment({...catalog,expectedBrandRevision:saved.revision});
+  const {categoryCovers,...legacy}=saved;
+  const renamed=inv.saveBrand({...legacy,categories:['Подлинные','Копия'],expectedRevision:saved.revision},apple.id);
+  assert.deepEqual({...renamed.categoryCovers},{'Подлинные':image});
+  const removed=inv.saveBrand({...renamed,categoryCovers:{},expectedRevision:renamed.revision},apple.id);
+  assert.deepEqual({...removed.categoryCovers},{});
+});
+
+test('category covers reject unsafe images, unknown categories and invalid maps atomically',()=>{
+  const {inv}=fixture(),apple=inv.brand('apple');
+  for(const categoryCovers of [null,[],{'Нет категории':'data:image/png;base64,aA=='},{'Оригинал':'https://example.com/a.png'},{'Оригинал':'data:image/svg+xml;base64,aA=='},{'Оригинал':'data:image/png;base64,'+'a'.repeat(350000)}]){
+    assert.throws(()=>inv.saveBrand({...apple,categoryCovers,expectedRevision:apple.revision},apple.id),/обложк/i);
+    assert.equal(inv.brand(apple.id).revision,apple.revision);
+  }
+});

@@ -256,7 +256,10 @@ try{
   await page.locator('#brand-categories').fill('Кабели\nЗарядки');
   const coverData=await page.evaluate(()=>{const c=document.createElement('canvas');c.width=40;c.height=40;const ctx=c.getContext('2d');ctx.fillStyle='#ffdd00';ctx.fillRect(0,0,40,40);return c.toDataURL('image/png').split(',')[1];});
   await page.locator('#brand-cover-file').setInputFiles({name:'cover.png',mimeType:'image/png',buffer:Buffer.from(coverData,'base64')});
-  await page.waitForSelector('.brand-cover-preview');await page.locator('#save-brand').click();
+  await page.waitForSelector('.brand-cover-preview');
+  await page.locator('[data-category-cover="0"]').setInputFiles({name:'category.png',mimeType:'image/png',buffer:Buffer.from(coverData,'base64')});
+  await page.waitForSelector('[data-category-preview="0"] img');
+  await page.locator('#save-brand').click();
   await page.waitForSelector('#xlsx-file');
   const customBrand=store.inventory.brands(true).find(b=>b.name==='Baseus');
   assert(customBrand);assert.equal(customBrand.hidden,true);
@@ -295,6 +298,8 @@ try{
   await page.locator('[data-view="shipments"]').click();assert.equal(await page.locator('.brand-card').count(),3);
   await page.locator(`[data-brand="${customBrand.id}"]`).click();
   assert.deepEqual(await page.locator('[data-category] strong').allTextContents(),['Кабели','Зарядки','Аккумуляторы']);
+  assert.equal(await page.locator('[data-category="Кабели"] .category-cover').count(),1);
+  assert.equal(await page.locator('[data-category="Зарядки"] .category-cover').count(),0);
   await page.setViewportSize({width:320,height:740});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
 
   // Webviews without WebP encoders silently return PNG, which can exceed the API limit.
