@@ -15,6 +15,7 @@ const statuses={draft:'Скрыт',arrived:'В продаже',closed:'Прод�
 const brandById=id=>state.brands.find(b=>b.id===id);
 const visibleBrands=()=>state.brands.filter(b=>!b.hidden);
 const builtInBrandCovers=[
+  ['airpods','data:image/webp;base64,UklGRpYFAABXRUJQVlA4IIoFAACQOACdASpAAUABPxGIu1ksKSalIViIyYAiCWlu4IywlOS0mxAc+iFq8xzhhp9hbki4/1mYrYD/WZitgP9ZmK2A/1mYrYD/WZitgSkVg03xdWzF+XBqzut+WA95v49a9JLfrlAzdyuKfVAjH++uUDOOsxA9DPsB/rMxWwJVsynv6lw7TMOdfWkt4zoTkMvnM2OK0LMpSmpASUN/qm5fFu7O9A9sE9Nx1u8YrsH3IKsxznVKtV50qSoVvHNO0qscPV6BD1ahaGhDKa//jMtVGwfkXCUJGQ5885Yy8hiQxT4mM4QPjauAcPfHmkjmn8133MvqjS0vvcSlvgk/1BfTTf6zLnoZ4J3LRjvrCOML3fhKSe4zRQd5ELpJnelJ8F1M6GTtaCgEbNLPgTwIviGMzzHCEPg/7N3XhS2iFYXcO/fxTRIwHJLNUO9CYwpmDtnGi4dLdQqlx7L/sYyt7F/wMqmlbWmbFqibHMAJzazAwMOR1z58cySWR8KmcVd7WUtlwzhyRxysKZlzLu9jC2I6uv/nBjkRzTtwH634nJ9hoTD5WtmUug2V5k15bb4H+SU5W6pXP+D3GRUOPNWFHNPIUuYgVKAsFn31y91Nuqr8AAD+8N4AAAAAAESCzTMlRNyWjqIBWRty6Y4Hip39nPQGhiFxJ8FR5T77kI8QjwDgtZrL3QD16L7qKocUwXc45mfrUDZYyfrZpFiObSEQez5dTnc9/ZPu1PKm1ew4xtXQICzXTZvQP9sqWwNjHtyNZb2EChfSUEpAi8lUYM63yjq/a2Rbo613IF8XRa6LNODVMc6IdCLHKrle3b2Lt9gaMBgO0yqTpn9XQuldTEsbBFeAyB3E1pFA1w2bQTNkoGH40iPnq92hWpR8csiDiFnvSVofeBYiTp+m1eHtklIEugt/mRBdd6shG1uXwGJDIkNXpOV/8WAKV1WKZan6aYFkWMlUKW6rw4GUxzCd5bQvJtjh4haI3JR2rSLr6IvQG5NlEOaRbAjIotsogp4d+k0aJm9noZIRkhjmFvDITLejQ8ljHhw3Ld5mrQ7X49tRBiZS+hMPKzkSaQkeIVLB/6Sk6Uxku8Ro375gC7TYkbko1GpZFzECijXzm6viiCU5qSJz209BVP6gyZwCDBanxtcTauvtsPtwiVXQJWVML+LeKAkzjT6KFplC/qjzIKLHxaGRWn9coHX0fUew5l9j6l91nfc6ffRRVn5OV4B4RsnS6CVoESaM34Zzocmo15pM715+hihhlgk2HhiFAnQ1UOFEF56UPx40czU3V0jHBt2yjuxzp0fqVjRt2bhiIhm7jzM8sMztxsgJr6I4tccio9EEy5Tx5cWlYLkvC8SfRSgc/UqI7GiwMiXJom13tDQ6ZIjVHd5kbdzc8JJIs1cxn6PWTww9pISDp/NdFGAs+ysC7Dz+x+4TrWh57Ka4ivppZiPRTECfCi0K5rPRWG3MdVyFH7C6PoGTMsxBWfAio5d4Q/FHS6T1vG7w7MpmQiZwaFXL6iSgXpJoiyy/+7jLGWHdiiVbnoU51DDUs/C2mtppA8MFpL+/WhviRxCt25ilphXo5VaQcWtIDzoj6ruootPSYTukMAKcu7ZulLgD5j3kHslBitr1aj0nsxB1pSMra22Vzx73Octt2B2VFn2kTUtq8qzJgsZzZaM3U42geuXRrDkF6QqAbAgKHgkOFlToTJVRolthWBq8L94aQZbbjo7bPmPR7ABZaLef09P6lIEsD572xeOz10z3MghmFx3nK0Hk4Qr2ABMyZO4q9WuJhKHeNSM/G4PVZr07NY/fRqezClIEsyXiId8fn7rgZPFB5xrOzXOP6m+crVZHs0ZuVlMbXx1V0SnrzINFnAf+0f8dWDK/+iEkWTn4zqEJzQ4AAA=='],
   ['macbook','macbook'],
   ['iphone','iphone'],
   ['ipad','ipad'],
@@ -24,7 +25,7 @@ const builtInBrandCovers=[
 const builtInBrandCover=brand=>{
   const text=groupKey([brand?.id,brand?.name].filter(Boolean).join(' '));
   const match=builtInBrandCovers.find(([key])=>text.includes(key));
-  return match?`./images/brands/${match[1]}.webp`:null;
+  return match?(match[1].startsWith('data:')?match[1]:`./images/brands/${match[1]}.webp`):null;
 };
 const catalogForBrand=id=>state.shipments.find(s=>s.id===id);
 const sellableProducts=catalog=>(catalog?.status==='arrived'&&!catalog.hidden?catalog.products:[]).filter(p=>!p.hidden&&p.stock>0);
@@ -368,13 +369,19 @@ async function coverFromFile(file){
   if(!/^image\/(png|jpeg|webp)$/.test(file.type)||file.size>15*1024*1024)throw Error('Выберите JPG, PNG или WebP размером до 15 МБ.');
   const bitmap=await createImageBitmap(file);
   try{
-    const scale=Math.min(1,720/Math.max(bitmap.width,bitmap.height)),canvas=document.createElement('canvas');
-    canvas.width=Math.max(1,Math.round(bitmap.width*scale));canvas.height=Math.max(1,Math.round(bitmap.height*scale));
-    canvas.getContext('2d').drawImage(bitmap,0,0,canvas.width,canvas.height);
-    let image=canvas.toDataURL('image/webp',.8);
-    if(image.length>350000)image=canvas.toDataURL('image/webp',.55);
-    if(image.length>350000)throw Error('Выберите изображение меньшего размера.');
-    return image;
+    const scale=Math.min(1,720/Math.max(bitmap.width,bitmap.height));
+    let width=Math.max(1,Math.round(bitmap.width*scale)),height=Math.max(1,Math.round(bitmap.height*scale));
+    const canvas=document.createElement('canvas'),ctx=canvas.getContext('2d',{alpha:false});
+    for(let attempt=0;attempt<9;attempt++){
+      canvas.width=width;canvas.height=height;ctx.drawImage(bitmap,0,0,width,height);
+      for(const quality of [.82,.68,.54,.4,.28,.18]){
+        const image=canvas.toDataURL('image/webp',quality);
+        if(image.length<=350000)return image;
+      }
+      if(width<=160&&height<=160)break;
+      width=Math.max(160,Math.round(width*.8));height=Math.max(160,Math.round(height*.8));
+    }
+    throw Error('Не удалось сжать изображение. Попробуйте выбрать другое JPG, PNG или WebP.');
   }finally{bitmap.close();}
 }
 function editBrand(brand=null){
