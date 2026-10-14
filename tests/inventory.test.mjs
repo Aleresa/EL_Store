@@ -470,3 +470,13 @@ test('two 5 MiB covers fit Cloudflare SQL limits and survive replacement, rollba
   assert.equal(inv.rows('SELECT data FROM brand_cover_chunks WHERE brand=?',saved.id).length,0);
   db.close();
 });
+
+test('five 5 MiB category covers save together without an aggregate cover limit',()=>{
+  const {inv}=fixture();
+  const image='data:image/jpeg;base64,'+Buffer.alloc(5*1024*1024,2).toString('base64');
+  const categories=['One','Two','Three','Four','Five'];
+  const saved=inv.saveBrand({name:'Five large covers',hidden:false,cover:null,categories,categoryCovers:Object.fromEntries(categories.map(name=>[name,image]))});
+  const restored=inv.brand(saved.id);
+  for(const name of categories)assert.equal(restored.categoryCovers[name],image);
+  assert.ok(inv.rows('SELECT data FROM brand_cover_chunks WHERE brand=?',saved.id).every(row=>row.data.length<=500000));
+});

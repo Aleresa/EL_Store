@@ -2,11 +2,11 @@ import {authenticate,isAdmin,ApiError} from './auth.mjs';
 import {Inventory} from './store.mjs';
 
 function json(data,status=200) { return Response.json(data,{status,headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}}); }
-async function readJson(request) {
+async function readJson(request,maxBytes=15000000) {
   if(!request.headers.get('Content-Type')?.includes('application/json')) throw new ApiError(415,'Ожидается JSON.');
-  if(Number(request.headers.get('Content-Length'))>15000000) throw new ApiError(413,'Файл слишком большой.');
+  if(Number(request.headers.get('Content-Length'))>maxBytes) throw new ApiError(413,'Файл слишком большой.');
   const body=await request.text();
-  if(body.length>15000000) throw new ApiError(413,'Файл слишком большой.');
+  if(body.length>maxBytes) throw new ApiError(413,'Файл слишком большой.');
   try { const value=JSON.parse(body); if(!value || typeof value !== 'object' || Array.isArray(value)) throw Error(); return value; } catch { throw new ApiError(400,'Некорректный JSON.'); }
 }
 async function telegram(env,method,body,timeout=15000) {
@@ -88,11 +88,11 @@ export class NewsletterStore {
       }
       if(path==='/api/admin/brands'&&request.method==='POST'){
         if(!admin)throw new ApiError(403,'Раздел доступен только владельцу.');
-        return json({brand:this.inventory.saveBrand(await readJson(request))},201);
+        return json({brand:this.inventory.saveBrand(await readJson(request,50000000))},201);
       }
       if(/^\/api\/admin\/brands\/[a-zA-Z0-9_-]{1,80}$/.test(path)&&request.method==='PATCH'){
         if(!admin)throw new ApiError(403,'Раздел доступен только владельцу.');
-        return json({brand:this.inventory.saveBrand(await readJson(request),path.split('/').pop())});
+        return json({brand:this.inventory.saveBrand(await readJson(request,50000000),path.split('/').pop())});
       }
       if(/^\/api\/admin\/brands\/[a-zA-Z0-9_-]{1,80}\/prices$/.test(path)&&request.method==='PATCH'){
         if(!admin)throw new ApiError(403,'Раздел доступен только владельцу.');

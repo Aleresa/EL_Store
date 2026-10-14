@@ -93,7 +93,6 @@ export class Inventory {
           categoryCovers[category]=image;
         }
       });
-      if(Object.values(categoryCovers).reduce((total,image)=>total+image.length,cover?.length||0)>14000000)throw new ApiError(400,'Обложки слишком большие. Уменьшите размер изображений.');
       const brand={id:id||'brand-'+crypto.randomUUID(),name,categories:names,cover,categoryCovers,hidden:input.hidden,revision:(previous?.revision||0)+1};
       this.sql.exec('INSERT INTO brands(id,data) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data',brand.id,JSON.stringify(this.storeBrandCovers(brand)));
       const shipment=this.one('SELECT data FROM shipments WHERE id=?',brand.id);
