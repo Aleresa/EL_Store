@@ -24,6 +24,7 @@ const builtInBrandCovers=[
 ];
 const builtInBrandCover=brand=>{
   const text=groupKey([brand?.id,brand?.name].filter(Boolean).join(' '));
+  if(/apple[\s_-]*watch/.test(text))return null;
   const match=builtInBrandCovers.find(([key])=>text.includes(key));
   return match?(match[1].startsWith('data:')?match[1]:`./images/brands/${match[1]}.webp`):null;
 };
@@ -161,7 +162,7 @@ function cards(){
   const list=visibleBrands().map(brand=>({brand,catalog:catalogForBrand(brand.id)}));
   $('#shipment-grid').innerHTML=list.map(({brand,catalog})=>{
     const available=sellableProducts(catalog),examples=available.filter(p=>p.image||p.imageKey).slice(0,2);
-    const cover=groupKey(brand.name).includes('airpods')?(brand.cover||builtInBrandCover(brand)):(builtInBrandCover(brand)||brand.cover);
+    const cover=brand.cover||builtInBrandCover(brand);
     return `<article class="brand-card"><button class="brand-open" data-brand="${esc(brand.id)}"><div class="brand-visual${cover||examples.length?' has-photo':''}">${cover?`<img class="brand-cover" src="${esc(cover)}" alt="${esc(brand.name)}" loading="lazy">`:examples.map(p=>photo(p,'cover-photo')).join('')}${cover?'':`<span class="brand-name">${esc(brand.name)}</span>`}</div><div class="brand-card-footer"><span>${available.length} товаров</span></div></button></article>`;
   }).join('');
   document.querySelectorAll('[data-brand]').forEach(button=>button.onclick=()=>openShipment(button.dataset.brand));
