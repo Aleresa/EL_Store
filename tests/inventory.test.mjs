@@ -480,3 +480,26 @@ test('five 5 MiB category covers save together without an aggregate cover limit'
   for(const name of categories)assert.equal(restored.categoryCovers[name],image);
   assert.ok(inv.rows('SELECT data FROM brand_cover_chunks WHERE brand=?',saved.id).every(row=>row.data.length<=500000));
 });
+
+test('30 separately uploaded 5 MiB covers use small brand settings and preserve every image',()=>{
+  const {inv}=fixture(),image='data:image/jpeg;base64,'+Buffer.alloc(5*1024*1024,3).toString('base64');
+  const categories=Array.from({length:30},(_,i)=>'Category '+i),categoryCovers={};
+  for(const name of categories)categoryCovers[name]=inv.uploadCover(image);
+  const input={name:'Thirty covers',categories,categoryCovers,cover:null,hidden:false};
+  assert.ok(JSON.stringify(input).length<10000);
+  const saved=inv.saveBrand(input),restored=inv.brand(saved.id);
+  for(const name of categories)assert.equal(inv.coverAsset(restored.categoryCovers[name].split('/').pop()),image);
+  assert.throws(()=>inv.saveBrand({...input,name:'Missing cover',cover:'/api/covers/00000000-0000-0000-0000-000000000000'}));
+});
+
+test('cover upload is admin-only and saved cover URLs return original image bytes',async()=>{
+  const {sql,txn}=fixture(),token='test:cover-api';
+  const ctx={storage:{sql,transactionSync:txn},waitUntil:()=>{}};
+  const store=new NewsletterStore(ctx,{BOT_TOKEN:token,ADMIN_IDS:'123'});
+  const image='data:image/png;base64,aGVsbG8=';
+  const request=auth=>new Request('https://app/api/admin/covers',{method:'POST',headers:{'Content-Type':'application/json',...(auth?{'X-Telegram-Init-Data':signedData(token)}:{})},body:JSON.stringify({image})});
+  assert.equal((await store.fetch(request(false))).status,401);
+  const response=await store.fetch(request(true));assert.equal(response.status,201);
+  const {url}=await response.json(),asset=await store.fetch(new Request('https://app'+url));
+  assert.equal(asset.headers.get('Content-Type'),'image/png');assert.equal(await asset.text(),'hello');
+});

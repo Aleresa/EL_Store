@@ -37,7 +37,7 @@ function toast(message){$('#toast').textContent=message;$('#toast').hidden=false
 function badge(status){return `<span class="badge ${esc(status)}">${esc(statuses[status]||status)}</span>`;}
 function notice(text){$('#notice').textContent=text;$('#notice').hidden=!text;}
 async function api(path,method='GET',body){
-  const savingBrand=method!=='GET'&&/^\/admin\/brands(?:\/[^/]+)?$/.test(path);
+  const savingBrand=method!=='GET'&&(path==='/admin/covers'||/^\/admin\/brands(?:\/[^/]+)?$/.test(path));
   let response,data;
   try{
     response=await fetch('/api'+path,{method,headers:{'Content-Type':'application/json','X-Telegram-Init-Data':tg?.initData||''},...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(savingBrand?120000:25000)});
@@ -424,7 +424,10 @@ function editBrand(brand=null){
     e.preventDefault();if(processing)return;
     const categories=categoryNames(),categoryCovers=Object.fromEntries(categories.filter(name=>categoryImages.has(name)).map(name=>[name,categoryImages.get(name)])),button=$('#save-brand');button.disabled=true;
     try{
-      const {brand:saved}=await api('/admin/brands'+(brand?'/'+brand.id:''),brand?'PATCH':'POST',{name:$('#brand-name').value,categories,cover,categoryCovers,hidden:brand?!$('#brand-visible').checked:true,...(brand?{expectedRevision:brand.revision}:{})});
+      const upload=async image=>image?.startsWith('data:')?(await api('/admin/covers','POST',{image})).url:image;
+      const savedCover=await upload(cover),savedCategoryCovers={};
+      for(const [name,image] of Object.entries(categoryCovers))savedCategoryCovers[name]=await upload(image);
+      const {brand:saved}=await api('/admin/brands'+(brand?'/'+brand.id:''),brand?'PATCH':'POST',{name:$('#brand-name').value,categories,cover:savedCover,categoryCovers:savedCategoryCovers,hidden:brand?!$('#brand-visible').checked:true,...(brand?{expectedRevision:brand.revision}:{})});
       const index=state.brands.findIndex(item=>item.id===saved.id);
       if(index<0)state.brands.push(saved);else state.brands[index]=saved;
       const catalog=catalogForBrand(saved.id);

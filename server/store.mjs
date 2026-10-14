@@ -22,6 +22,7 @@ export class Inventory {
     sql.exec('CREATE INDEX IF NOT EXISTS orders_shipment_status ON orders(shipment,status)');
     sql.exec('CREATE TABLE IF NOT EXISTS brands (id TEXT PRIMARY KEY, data TEXT NOT NULL)');
     sql.exec('CREATE TABLE IF NOT EXISTS brand_cover_chunks (brand TEXT NOT NULL, slot TEXT NOT NULL, part INTEGER NOT NULL, data TEXT NOT NULL, PRIMARY KEY(brand,slot,part))');
+    sql.exec('CREATE TABLE IF NOT EXISTS cover_assets (id TEXT NOT NULL, part INTEGER NOT NULL, data TEXT NOT NULL, PRIMARY KEY(id,part))');
     for(const brand of DEFAULT_BRANDS){
       const saved=this.one('SELECT data FROM shipments WHERE id=?',brand.id),catalog=saved&&JSON.parse(saved.data);
       const data={...brand,categories:catalog?.groups?.length?catalog.groups:brand.categories,cover:null,hidden:false,revision:1};
@@ -48,12 +49,22 @@ export class Inventory {
   storeBrandCovers(brand) {
     this.sql.exec('DELETE FROM brand_cover_chunks WHERE brand=?',brand.id);
     const write=(image,slot)=>{
-      if(!image)return image;
+      if(!image||image.startsWith('/api/covers/'))return image;
       for(let start=0,part=0;start<image.length;start+=500000,part++)this.sql.exec('INSERT INTO brand_cover_chunks(brand,slot,part,data) VALUES(?,?,?,?)',brand.id,slot,part,image.slice(start,start+500000));
       return 'stored-cover:'+slot;
     };
     return {...brand,cover:write(brand.cover,'brand'),categoryCovers:Object.fromEntries(Object.entries(brand.categoryCovers).map(([name,image],index)=>[name,write(image,'category-'+index)]))};
   }
+  validCover(image) {
+    return typeof image==='string'&&((/^data:image\/(webp|png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(image)&&image.length<=7000000)||(/^\/api\/covers\/[a-f0-9-]{36}$/.test(image)&&Boolean(this.one('SELECT id FROM cover_assets WHERE id=? LIMIT 1',image.split('/').pop()))));
+  }
+  uploadCover(image) {
+    if(typeof image!=='string'||!image.startsWith('data:')||!this.validCover(image))throw new ApiError(400,'Обложка должна быть JPG, PNG или WebP до 5 МБ.');
+    const id=crypto.randomUUID();
+    this.transaction(()=>{for(let start=0,part=0;start<image.length;start+=500000,part++)this.sql.exec('INSERT INTO cover_assets(id,part,data) VALUES(?,?,?)',id,part,image.slice(start,start+500000));});
+    return '/api/covers/'+id;
+  }
+  coverAsset(id) {return this.rows('SELECT data FROM cover_assets WHERE id=? ORDER BY part',id).map(r=>r.data).join('');}
   saveBrand(input,id=null) {
     if(id!==null&&!validId(id))throw new ApiError(400,'Некорректный бренд.');
     const name=trim(input.name,80),categories=input.categories;
@@ -62,7 +73,7 @@ export class Inventory {
     const names=categories.map(c=>c.trim().replace(/\s+/g,' '));
     if(typeof input.hidden!=='boolean')throw new ApiError(400,'Укажите видимость бренда.');
     const cover=input.cover??null;
-    if(cover!==null&&(typeof cover!=='string'||!/^data:image\/(webp|png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(cover)||cover.length>7000000))throw new ApiError(400,'Обложка слишком большая или имеет неверный формат.');
+    if(cover!==null&&!this.validCover(cover))throw new ApiError(400,'Обложка слишком большая или имеет неверный формат.');
     return this.transaction(()=>{
       const previous=id&&this.brand(id);
       if(id&&!previous)throw new ApiError(404,'Бренд не найден.');
@@ -89,7 +100,7 @@ export class Inventory {
         const oldName=previous?.categories?.length===names.length&&!previous.categories.includes(category)?previous.categories[index]:category;
         const image=supplied===undefined?previous?.categoryCovers?.[oldName]:Object.hasOwn(supplied,category)?supplied[category]:null;
         if(image!=null){
-          if(typeof image!=='string'||!/^data:image\/(webp|png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(image)||image.length>7000000)throw new ApiError(400,'Обложка категории слишком большая или имеет неверный формат.');
+          if(!this.validCover(image))throw new ApiError(400,'Обложка категории слишком большая или имеет неверный формат.');
           categoryCovers[category]=image;
         }
       });

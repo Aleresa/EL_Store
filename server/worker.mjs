@@ -44,6 +44,12 @@ export class NewsletterStore {
       const url=new URL(request.url),path=url.pathname;
       if(path==='/api/bootstrap') return json({mode:this.env.BOT_TOKEN?'live':'preview',notificationReady:Boolean(this.env.ORDER_CHAT_ID),botUsername:this.env.BOT_USERNAME});
       if(path==='/telegram/webhook') return await this.webhook(request);
+      if(/^\/api\/covers\/[a-f0-9-]{36}$/.test(path)&&request.method==='GET'){
+        const image=this.inventory.coverAsset(path.split('/').pop());
+        if(!image)throw new ApiError(404,'Обложка не найдена.');
+        const [header,encoded]=image.split(','),bytes=Uint8Array.from(atob(encoded),c=>c.charCodeAt(0));
+        return new Response(bytes,{headers:{'Content-Type':header.slice(5,header.indexOf(';')),'Cache-Control':'public, max-age=31536000, immutable','X-Content-Type-Options':'nosniff'}});
+      }
       const user=await authenticate(request.headers.get('X-Telegram-Init-Data'),this.env.BOT_TOKEN);
       const admin=isAdmin(user,this.env);
       if(path==='/api/me' && request.method==='GET') {
@@ -85,6 +91,10 @@ export class NewsletterStore {
         const order='lines' in input?this.inventory.editOrder(user,id,input,admin):this.inventory.changeOrder(user,id,input.status,admin,input.expectedRevision);
         this.ctx.waitUntil(this.flush());
         return json({order});
+      }
+      if(path==='/api/admin/covers'&&request.method==='POST'){
+        if(!admin)throw new ApiError(403,'Раздел доступен только владельцу.');
+        return json({url:this.inventory.uploadCover((await readJson(request,7100000)).image)},201);
       }
       if(path==='/api/admin/brands'&&request.method==='POST'){
         if(!admin)throw new ApiError(403,'Раздел доступен только владельцу.');
