@@ -21,6 +21,7 @@ export class Inventory {
     sql.exec('CREATE INDEX IF NOT EXISTS orders_user_status ON orders(user_id,status)');
     sql.exec('CREATE INDEX IF NOT EXISTS orders_shipment_status ON orders(shipment,status)');
     sql.exec('CREATE TABLE IF NOT EXISTS brands (id TEXT PRIMARY KEY, data TEXT NOT NULL)');
+    sql.exec('CREATE TABLE IF NOT EXISTS brand_cover_chunks (brand TEXT NOT NULL, slot TEXT NOT NULL, part INTEGER NOT NULL, data TEXT NOT NULL, PRIMARY KEY(brand,slot,part))');
     for(const brand of DEFAULT_BRANDS){
       const saved=this.one('SELECT data FROM shipments WHERE id=?',brand.id),catalog=saved&&JSON.parse(saved.data);
       const data={...brand,categories:catalog?.groups?.length?catalog.groups:brand.categories,cover:null,hidden:false,revision:1};
@@ -38,8 +39,21 @@ export class Inventory {
   }
   rows(query,...bindings) { return [...this.sql.exec(query,...bindings)]; }
   one(query,...bindings) { return this.rows(query,...bindings)[0]; }
-  brand(id) {const row=this.one('SELECT data FROM brands WHERE id=?',id);return row?JSON.parse(row.data):null;}
-  brands(admin=false) {return this.rows('SELECT data FROM brands ORDER BY rowid').map(r=>JSON.parse(r.data)).filter(b=>admin||!b.hidden);}
+  hydrateBrand(brand) {
+    const read=image=>typeof image==='string'&&image.startsWith('stored-cover:')?this.rows('SELECT data FROM brand_cover_chunks WHERE brand=? AND slot=? ORDER BY part',brand.id,image.slice(13)).map(row=>row.data).join(''):image;
+    return {...brand,cover:read(brand.cover),...(brand.categoryCovers?{categoryCovers:Object.fromEntries(Object.entries(brand.categoryCovers).map(([name,image])=>[name,read(image)]))}:{})};
+  }
+  brand(id) {const row=this.one('SELECT data FROM brands WHERE id=?',id);return row?this.hydrateBrand(JSON.parse(row.data)):null;}
+  brands(admin=false) {return this.rows('SELECT data FROM brands ORDER BY rowid').map(r=>JSON.parse(r.data)).filter(b=>admin||!b.hidden).map(b=>this.hydrateBrand(b));}
+  storeBrandCovers(brand) {
+    this.sql.exec('DELETE FROM brand_cover_chunks WHERE brand=?',brand.id);
+    const write=(image,slot)=>{
+      if(!image)return image;
+      for(let start=0,part=0;start<image.length;start+=500000,part++)this.sql.exec('INSERT INTO brand_cover_chunks(brand,slot,part,data) VALUES(?,?,?,?)',brand.id,slot,part,image.slice(start,start+500000));
+      return 'stored-cover:'+slot;
+    };
+    return {...brand,cover:write(brand.cover,'brand'),categoryCovers:Object.fromEntries(Object.entries(brand.categoryCovers).map(([name,image],index)=>[name,write(image,'category-'+index)]))};
+  }
   saveBrand(input,id=null) {
     if(id!==null&&!validId(id))throw new ApiError(400,'Некорректный бренд.');
     const name=trim(input.name,80),categories=input.categories;
@@ -81,7 +95,7 @@ export class Inventory {
       });
       if(Object.values(categoryCovers).reduce((total,image)=>total+image.length,cover?.length||0)>14000000)throw new ApiError(400,'Обложки слишком большие. Уменьшите размер изображений.');
       const brand={id:id||'brand-'+crypto.randomUUID(),name,categories:names,cover,categoryCovers,hidden:input.hidden,revision:(previous?.revision||0)+1};
-      this.sql.exec('INSERT INTO brands(id,data) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data',brand.id,JSON.stringify(brand));
+      this.sql.exec('INSERT INTO brands(id,data) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data',brand.id,JSON.stringify(this.storeBrandCovers(brand)));
       const shipment=this.one('SELECT data FROM shipments WHERE id=?',brand.id);
       if(shipment){const data={...JSON.parse(shipment.data),title:name,brand:name,groups:names};this.sql.exec('UPDATE shipments SET data=? WHERE id=?',JSON.stringify(data),brand.id);}
       return brand;

@@ -444,3 +444,29 @@ test('category covers reject unsafe images, unknown categories and invalid maps 
     assert.equal(inv.brand(apple.id).revision,apple.revision);
   }
 });
+
+test('two 5 MiB covers fit Cloudflare SQL limits and survive replacement, rollback and restart',()=>{
+  const db=new DatabaseSync(':memory:');
+  const sql={exec(query,...args){
+    for(const arg of args)if(typeof arg==='string'&&Buffer.byteLength(arg)>2000000)throw Error('Cloudflare SQL row limit');
+    const stmt=db.prepare(query);if(/^SELECT/i.test(query))return stmt.all(...args);stmt.run(...args);return [];
+  }};
+  const txn=fn=>{db.exec('BEGIN IMMEDIATE');try{const result=fn();db.exec('COMMIT');return result;}catch(error){db.exec('ROLLBACK');throw error;}};
+  let inv=new Inventory(sql,txn);
+  const image='data:image/jpeg;base64,'+Buffer.alloc(5*1024*1024,1).toString('base64');
+  const saved=inv.saveBrand({name:'Large covers',categories:['One','Two'],hidden:false,cover:image,categoryCovers:{One:image}});
+  assert.equal(inv.brand(saved.id).cover,image);
+  assert.equal(inv.brands(true).find(b=>b.id===saved.id).categoryCovers.One,image);
+  assert.ok(JSON.parse(inv.one('SELECT data FROM brands WHERE id=?',saved.id).data).cover.startsWith('stored-cover:'));
+  assert.ok(inv.rows('SELECT data FROM brand_cover_chunks').every(r=>r.data.length<=500000));
+  inv=new Inventory(sql,txn);
+  assert.equal(inv.brand(saved.id).categoryCovers.One,image);
+  const renamed=inv.saveBrand({...saved,categories:['Renamed','Two'],categoryCovers:undefined,expectedRevision:saved.revision},saved.id);
+  assert.equal(renamed.categoryCovers.Renamed,image);
+  assert.throws(()=>inv.saveBrand({...renamed,categoryCovers:{Renamed:'invalid'},expectedRevision:renamed.revision},saved.id));
+  assert.equal(inv.brand(saved.id).cover,image);
+  const cleared=inv.saveBrand({...renamed,cover:null,categoryCovers:{},expectedRevision:renamed.revision},saved.id);
+  assert.equal(cleared.cover,null);
+  assert.equal(inv.rows('SELECT data FROM brand_cover_chunks WHERE brand=?',saved.id).length,0);
+  db.close();
+});
