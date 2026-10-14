@@ -161,7 +161,7 @@ function cards(){
   const list=visibleBrands().map(brand=>({brand,catalog:catalogForBrand(brand.id)}));
   $('#shipment-grid').innerHTML=list.map(({brand,catalog})=>{
     const available=sellableProducts(catalog),examples=available.filter(p=>p.image||p.imageKey).slice(0,2);
-    const cover=builtInBrandCover(brand)||brand.cover;
+    const cover=groupKey(brand.name).includes('airpods')?(brand.cover||builtInBrandCover(brand)):(builtInBrandCover(brand)||brand.cover);
     return `<article class="brand-card"><button class="brand-open" data-brand="${esc(brand.id)}"><div class="brand-visual${cover||examples.length?' has-photo':''}">${cover?`<img class="brand-cover" src="${esc(cover)}" alt="${esc(brand.name)}" loading="lazy">`:examples.map(p=>photo(p,'cover-photo')).join('')}${cover?'':`<span class="brand-name">${esc(brand.name)}</span>`}</div><div class="brand-card-footer"><span>${available.length} товаров</span></div></button></article>`;
   }).join('');
   document.querySelectorAll('[data-brand]').forEach(button=>button.onclick=()=>openShipment(button.dataset.brand));
@@ -367,21 +367,23 @@ function renderAdmin(){
 }
 async function coverFromFile(file){
   if(!/^image\/(png|jpeg|webp)$/.test(file.type)||file.size>15*1024*1024)throw Error('Выберите JPG, PNG или WebP размером до 15 МБ.');
+  const maxLength=2000000;
+  const readOriginal=()=>new Promise((resolve,reject)=>{
+    const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(Error('Не удалось прочитать изображение.'));reader.readAsDataURL(file);
+  });
+  if(file.size<=Math.floor((maxLength-64)*3/4))return readOriginal();
   const bitmap=await createImageBitmap(file);
   try{
-    const scale=Math.min(1,720/Math.max(bitmap.width,bitmap.height));
-    let width=Math.max(1,Math.round(bitmap.width*scale)),height=Math.max(1,Math.round(bitmap.height*scale));
-    const canvas=document.createElement('canvas'),ctx=canvas.getContext('2d',{alpha:false});
-    for(let attempt=0;attempt<9;attempt++){
-      canvas.width=width;canvas.height=height;ctx.drawImage(bitmap,0,0,width,height);
-      for(const quality of [.82,.68,.54,.4,.28,.18]){
-        const image=canvas.toDataURL('image/webp',quality);
-        if(image.length<=350000)return image;
-      }
-      if(width<=160&&height<=160)break;
-      width=Math.max(160,Math.round(width*.8));height=Math.max(160,Math.round(height*.8));
-    }
-    throw Error('Не удалось сжать изображение. Попробуйте выбрать другое JPG, PNG или WebP.');
+    const scale=Math.min(1,2048/Math.max(bitmap.width,bitmap.height));
+    const canvas=document.createElement('canvas');
+    canvas.width=Math.max(1,Math.round(bitmap.width*scale));canvas.height=Math.max(1,Math.round(bitmap.height*scale));
+    const ctx=canvas.getContext('2d');ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';
+    ctx.drawImage(bitmap,0,0,canvas.width,canvas.height);
+    const lossless=canvas.toDataURL('image/png');
+    if(lossless.length<=maxLength)return lossless;
+    const image=canvas.toDataURL('image/webp',.95);
+    if(image.length<=maxLength)return image;
+    throw Error('Изображение слишком большое для сохранения без потери качества. Выберите файл до 1,4 МБ или уменьшите его самостоятельно.');
   }finally{bitmap.close();}
 }
 function editBrand(brand=null){

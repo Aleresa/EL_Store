@@ -48,7 +48,7 @@ export class Inventory {
     const names=categories.map(c=>c.trim().replace(/\s+/g,' '));
     if(typeof input.hidden!=='boolean')throw new ApiError(400,'Укажите видимость бренда.');
     const cover=input.cover??null;
-    if(cover!==null&&(typeof cover!=='string'||!/^data:image\/(webp|png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(cover)||cover.length>350000))throw new ApiError(400,'Обложка слишком большая или имеет неверный формат.');
+    if(cover!==null&&(typeof cover!=='string'||!/^data:image\/(webp|png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(cover)||cover.length>2000000))throw new ApiError(400,'Обложка слишком большая или имеет неверный формат.');
     return this.transaction(()=>{
       const previous=id&&this.brand(id);
       if(id&&!previous)throw new ApiError(404,'Бренд не найден.');
@@ -75,7 +75,7 @@ export class Inventory {
         const oldName=previous?.categories?.length===names.length&&!previous.categories.includes(category)?previous.categories[index]:category;
         const image=supplied===undefined?previous?.categoryCovers?.[oldName]:Object.hasOwn(supplied,category)?supplied[category]:null;
         if(image!=null){
-          if(typeof image!=='string'||!/^data:image\/(webp|png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(image)||image.length>350000)throw new ApiError(400,'Обложка категории слишком большая или имеет неверный формат.');
+          if(typeof image!=='string'||!/^data:image\/(webp|png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(image)||image.length>2000000)throw new ApiError(400,'Обложка категории слишком большая или имеет неверный формат.');
           categoryCovers[category]=image;
         }
       });
