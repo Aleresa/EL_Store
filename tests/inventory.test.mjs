@@ -439,7 +439,7 @@ test('category covers persist, survive legacy settings and Excel, follow renames
 
 test('category covers reject unsafe images, unknown categories and invalid maps atomically',()=>{
   const {inv}=fixture(),apple=inv.brand('apple');
-  for(const categoryCovers of [null,[],{'Нет категории':'data:image/png;base64,aA=='},{'Оригинал':'https://example.com/a.png'},{'Оригинал':'data:image/svg+xml;base64,aA=='},{'Оригинал':'data:image/png;base64,'+'a'.repeat(2000000)}]){
+  for(const categoryCovers of [null,[],{'Нет категории':'data:image/png;base64,aA=='},{'Оригинал':'https://example.com/a.png'},{'Оригинал':'data:image/svg+xml;base64,aA=='},{'Оригинал':'data:image/png;base64,'+'a'.repeat(7000000)}]){
     assert.throws(()=>inv.saveBrand({...apple,categoryCovers,expectedRevision:apple.revision},apple.id),/обложк/i);
     assert.equal(inv.brand(apple.id).revision,apple.revision);
   }

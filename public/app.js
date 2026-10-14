@@ -367,7 +367,7 @@ function renderAdmin(){
 }
 async function coverFromFile(file){
   if(!/^image\/(png|jpeg|webp)$/.test(file.type)||file.size>15*1024*1024)throw Error('Выберите JPG, PNG или WebP размером до 15 МБ.');
-  const maxLength=2000000;
+  const maxLength=7000000;
   const readOriginal=()=>new Promise((resolve,reject)=>{
     const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(Error('Не удалось прочитать изображение.'));reader.readAsDataURL(file);
   });
@@ -383,7 +383,7 @@ async function coverFromFile(file){
     if(lossless.length<=maxLength)return lossless;
     const image=canvas.toDataURL('image/webp',.95);
     if(image.length<=maxLength)return image;
-    throw Error('Изображение слишком большое для сохранения без потери качества. Выберите файл до 1,4 МБ или уменьшите его самостоятельно.');
+    throw Error('Изображение слишком большое для сохранения без потери качества. Выберите файл до 5 МБ или уменьшите его самостоятельно.');
   }finally{bitmap.close();}
 }
 function editBrand(brand=null){
