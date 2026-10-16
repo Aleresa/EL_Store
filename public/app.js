@@ -41,9 +41,10 @@ function notice(text){$('#notice').textContent=text;$('#notice').hidden=!text;}
 async function api(path,method='GET',body){
   const savingBrand=method!=='GET'&&(path==='/admin/covers'||/^\/admin\/brands(?:\/[^/]+)?$/.test(path));
   const savingStock=method==='POST'&&path.startsWith('/admin/stock/');
+  const savingCatalog=method==='POST'&&path==='/admin/shipments';
   let response,data;
   try{
-    response=await fetch('/api'+path,{method,headers:{'Content-Type':'application/json','X-Telegram-Init-Data':tg?.initData||''},...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(savingBrand||savingStock?120000:25000)});
+    response=await fetch('/api'+path,{method,headers:{'Content-Type':'application/json','X-Telegram-Init-Data':tg?.initData||''},...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(savingBrand||savingStock||savingCatalog?120000:25000)});
     data=await response.json();
   }catch(error){
     if(error.name==='AbortError'||error.name==='TimeoutError')throw Error(savingBrand?'Сервер не ответил вовремя. Закройте настройки и откройте их заново, чтобы проверить, сохранились ли изменения.':'Сервер не ответил вовремя. Проверьте подключение и попробуйте снова.');
@@ -372,7 +373,7 @@ function renderAdmin(){
 function showGlobalStockSync(){
   importController?.abort();
   let parsed=null,preview=null;
-  showDialog('Обновление остатков всех брендов',`<p class="fine-print">Загрузите один Excel со всеми остатками. Сопоставим товары по столбцу «Код» (или «Артикул») во всех брендах. Изменится только количество; названия, цены, фото, категории, видимость и заказы сохранятся.</p><label class="field">Общий Excel (.xls / .xlsx)<input type="file" id="global-stock-file" accept=".xls,.xlsx"></label><div id="global-stock-preview" aria-live="polite"></div><p class="error" id="global-stock-error" role="alert"></p><button class="primary full" id="global-stock-apply" type="button" disabled>Обновить остатки</button>`);
+  showDialog('Обновление остатков всех брендов',`<p class="fine-print">Загрузите один Excel до 100 МБ со всеми остатками. Сопоставим товары по столбцу «Код» (или «Артикул») во всех брендах. Изменится только количество; названия, цены, фото, категории, видимость и заказы сохранятся.</p><label class="field">Общий Excel (.xls / .xlsx)<input type="file" id="global-stock-file" accept=".xls,.xlsx"></label><div id="global-stock-preview" aria-live="polite"></div><p class="error" id="global-stock-error" role="alert"></p><button class="primary full" id="global-stock-apply" type="button" disabled>Обновить остатки</button>`);
   const report=$('#global-stock-preview'),error=$('#global-stock-error'),button=$('#global-stock-apply');
   $('#global-stock-file').onchange=async e=>{
     const file=e.target.files[0];if(!file)return;
@@ -550,7 +551,7 @@ function editShipment(existing,brand){
   const groups=[...brand.categories],historyProducts=existing?.products||[];
   let importCategory='';
   let products=existing?manualProducts(existing.products.filter(p=>!p.hidden&&p.stock>0).map(p=>({...p,stock:p.stock})),groups):null,warnings=[];
-  showDialog(`${brand.name} — каталог`,`<form id="shipment-form"><p class="fine-print">Выберите категорию перед загрузкой Excel. Обновятся только её товары; остальные категории сохранятся. Отсутствующие в файле товары выбранной категории будут скрыты.</p><p class="fine-print"><strong>Категории:</strong> ${groups.map(esc).join(' · ')}</p><label class="field">Куда загрузить Excel<select id="import-category"><option value="">Весь бренд — обновить все категории</option>${groups.map(name=>`<option value="${esc(name)}">${esc(name)}</option>`).join('')}</select></label><label class="field">${existing?'Обновить каталог из Excel':'Excel с товарами'}<input type="file" id="xlsx-file" accept=".xls,.xlsx" ${existing?'':'required'}></label><div id="import-info">${products?`<p class="import-summary">Сейчас в продаже: ${products.length} позиций</p>`:''}</div><div id="category-editor"></div><label class="field checkbox-field"><input id="publish-brand" type="checkbox" ${!existing||!brand.hidden?'checked':''}> Показывать бренд покупателям после сохранения</label><p id="import-error" class="error" role="alert"></p><button class="primary full" id="save-shipment" type="submit" ${products?'':'disabled'}>Сохранить каталог</button></form>`);
+  showDialog(`${brand.name} — каталог`,`<form id="shipment-form"><p class="fine-print">Excel до 100 МБ; фотографии сжимаются автоматически в браузере.</p><p class="fine-print">Выберите категорию перед загрузкой Excel. Обновятся только её товары; остальные категории сохранятся. Отсутствующие в файле товары выбранной категории будут скрыты.</p><p class="fine-print"><strong>Категории:</strong> ${groups.map(esc).join(' · ')}</p><label class="field">Куда загрузить Excel<select id="import-category"><option value="">Весь бренд — обновить все категории</option>${groups.map(name=>`<option value="${esc(name)}">${esc(name)}</option>`).join('')}</select></label><label class="field">${existing?'Обновить каталог из Excel':'Excel с товарами'}<input type="file" id="xlsx-file" accept=".xls,.xlsx" ${existing?'':'required'}></label><div id="import-info">${products?`<p class="import-summary">Сейчас в продаже: ${products.length} позиций</p>`:''}</div><div id="category-editor"></div><label class="field checkbox-field"><input id="publish-brand" type="checkbox" ${!existing||!brand.hidden?'checked':''}> Показывать бренд покупателям после сохранения</label><p id="import-error" class="error" role="alert"></p><button class="primary full" id="save-shipment" type="submit" ${products?'':'disabled'}>Сохранить каталог</button></form>`);
   const form=$('#shipment-form');
   function reviewCategories(){
     const container=$('#category-editor');if(!products){container.textContent='';return;}
