@@ -333,6 +333,31 @@ try{
   assert.deepEqual(appleAfter.products.filter(p=>p.group==='Оригинал'),originalsBefore);
   assert.equal(appleAfter.products.find(p=>p.sku==='COPY-NEW').group,'Копия');
 
+  // Stock-only synchronization across Apple and the custom brand; unknown articles are ignored.
+  const applePriceBefore=store.inventory.catalog(true).find(s=>s.id==='apple').products.find(p=>p.sku==='COPY-NEW').price;
+  const baseusPriceBefore=store.inventory.catalog(true).find(s=>s.id===customBrand.id).products.find(p=>p.sku==='BS1').price;
+  await page.locator('#global-stock-sync').click();
+  await page.locator('#global-stock-file').setInputFiles({
+    name:'all-stock.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    buffer:await supplierXlsx([
+      ['Код','Доступно','Цена продажи'],
+      ['COPY-NEW','0','999999'],
+      ['BS1','3','111111'],
+      ['not-in-store','5','500']
+    ])
+  });
+  await page.waitForSelector('#global-stock-preview .import-summary');
+  assert.match(await page.locator('#global-stock-preview').innerText(),/Не найдены в магазине: 1/);
+  assert.equal(await page.locator('#global-stock-apply').isDisabled(),true);
+  await page.locator('#global-stock-ack').check();
+  await page.locator('#global-stock-apply').click();
+  await page.waitForSelector('#global-stock-file',{state:'hidden'});
+  const appStore=store.inventory.catalog(true).find(s=>s.id==='apple').products.find(p=>p.sku==='COPY-NEW');
+  const baseusStore=store.inventory.catalog(true).find(s=>s.id===customBrand.id).products.find(p=>p.sku==='BS1');
+  assert.equal(appStore.stock,0);assert.equal(baseusStore.stock,3);
+  assert.equal(appStore.price,applePriceBefore);assert.equal(baseusStore.price,baseusPriceBefore);
+  assert.equal(store.inventory.catalog(true).flatMap(s=>s.products).some(p=>p.sku==='not-in-store'),false);
+
   assert.deepEqual(errors,[]);
   console.log('Browser checks passed: shared persistent cart, cross-brand order/edit/cancel, lost-response recovery, price/stock reconciliation, photo viewer, repeat order, sorting/model filters, responsive layout and Excel import.');
 }finally{
