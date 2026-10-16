@@ -297,8 +297,11 @@ try{
   await page.locator('#save-brand').click();await page.waitForSelector('#brand-form',{state:'hidden'});
   await page.locator('[data-view="shipments"]').click();assert.equal(await page.locator('.brand-card').count(),3);
   await page.locator(`[data-brand="${customBrand.id}"]`).click();
-  assert.deepEqual(await page.locator('[data-category] strong').allTextContents(),['Кабели','Зарядки','Аккумуляторы']);
+  assert.deepEqual(await page.locator('[data-category] strong').allTextContents(),['Зарядки','Аккумуляторы']);
   assert.equal(await page.locator('[data-category="Кабели"] .category-cover').count(),1);
+  assert.equal(await page.locator('[data-category="Кабели"] strong').count(),0);
+  assert.equal(await page.locator('[data-category="Кабели"]').getAttribute('aria-label'),'Кабели');
+  assert.match(await page.locator('[data-category="Кабели"]').innerText(),/товаров/);
   assert.equal(await page.locator('[data-category="Зарядки"] .category-cover').count(),0);
   await page.setViewportSize({width:320,height:740});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
 
