@@ -1,4 +1,5 @@
 import {parseSupplierRows} from './supplier-rows.js';
+import {validateExcelFile,MAX_UNPACKED_XLSX_BYTES} from './excel-limits.js';
 // Supplier XLSX reader: reads cells and DrawingML anchors, then compresses images.
 // All processing stays in the owner's browser until Save is pressed.
 const xml = text => {
@@ -38,8 +39,7 @@ export async function compressProductImage(bytes) {
   } finally {URL.revokeObjectURL(url);}
 }
 export async function readSupplierExcel(file,{signal}={}) {
-  if(!/\.xlsx?$/i.test(file.name))throw Error('Выберите файл .xls или .xlsx.');
-  if(file.size>25*1024*1024)throw Error('Excel должен быть не больше 25 МБ.');
+  validateExcelFile(file);
   signal?.throwIfAborted();
   const bytes=await file.arrayBuffer();
   signal?.throwIfAborted();
@@ -59,7 +59,7 @@ function readLegacy(bytes,signal) {
     const worker=new Worker(new URL('./xls-worker.js',import.meta.url));
     const finish=(error,result)=>{worker.terminate();signal?.removeEventListener('abort',abort);clearTimeout(timer);error?reject(error):resolve(result);};
     const abort=()=>finish(new DOMException('Импорт отменён','AbortError'));
-    const timer=setTimeout(()=>finish(Error('Чтение Excel заняло слишком много времени. Попробуйте уменьшить файл.')),60000);
+    const timer=setTimeout(()=>finish(Error('Чтение Excel заняло слишком много времени. Попробуйте уменьшить файл.')),240000);
     signal?.addEventListener('abort',abort,{once:true});
     if(signal?.aborted){abort();return;}
     worker.onerror=()=>finish(Error('Не удалось запустить обработчик XLS. Обновите приложение и повторите загрузку.'));
@@ -72,7 +72,7 @@ async function readXlsx(file,signal) {
   let unpacked=0;
   for(const f of Object.values(zip.files)) {
     unpacked+=f._data?.uncompressedSize || 0;
-    if(unpacked>120*1024*1024)throw Error('Распакованный Excel слишком большой.');
+    if(unpacked>MAX_UNPACKED_XLSX_BYTES)throw Error('Распакованный Excel превышает безопасный предел 500 МБ.');
   }
   const workbook=zip.file('xl/workbook.xml');if(!workbook)throw Error('Нужен файл .xlsx.');
   const wr=await relations(zip,'xl/workbook.xml');
