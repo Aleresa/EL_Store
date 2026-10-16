@@ -1,7 +1,7 @@
+import {validateExcelFile} from './excel-limits.js';
 // Isolated from the regular goods + images importer.
 export async function readStockExcel(file,{signal}={}){
-  if(!/\.xlsx?$/i.test(file?.name||''))throw Error('Выберите файл .xls или .xlsx.');
-  if(file.size>25*1024*1024)throw Error('Excel должен быть не больше 25 МБ.');
+  validateExcelFile(file);
   signal?.throwIfAborted();
   const buffer=await file.arrayBuffer();
   signal?.throwIfAborted();
@@ -14,7 +14,7 @@ export async function readStockExcel(file,{signal}={}){
       error?reject(error):resolve(result);
     };
     const abort=()=>finish(new DOMException('Импорт отменён','AbortError'));
-    const timer=setTimeout(()=>finish(Error('Чтение Excel заняло слишком много времени.')),90000);
+    const timer=setTimeout(()=>finish(Error('Чтение Excel заняло слишком много времени.')),240000);
     signal?.addEventListener('abort',abort,{once:true});
     if(signal?.aborted){abort();return;}
     worker.onerror=()=>finish(Error('Не удалось запустить чтение Excel.'));
