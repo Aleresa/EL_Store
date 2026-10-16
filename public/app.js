@@ -4,6 +4,7 @@ import {manualProducts,groupKey} from './product-groups.js';
 import {DEFAULT_BRANDS,searchCatalog} from './catalog-config.js';
 import {cartKey,cartEntry,readCart,reconcileCart,repeatCart,repriceCart} from './cart.js';
 import {phoneModels,sortProducts} from './catalog-tools.js';
+import {readStockExcel} from './stock-sync.js';
 
 const $=s=>document.querySelector(s), app=$('#app'), dialog=$('#dialog');
 const tg=window.Telegram?.WebApp;
@@ -39,9 +40,10 @@ function badge(status){return `<span class="badge ${esc(status)}">${esc(statuses
 function notice(text){$('#notice').textContent=text;$('#notice').hidden=!text;}
 async function api(path,method='GET',body){
   const savingBrand=method!=='GET'&&(path==='/admin/covers'||/^\/admin\/brands(?:\/[^/]+)?$/.test(path));
+  const savingStock=method==='POST'&&path.startsWith('/admin/stock/');
   let response,data;
   try{
-    response=await fetch('/api'+path,{method,headers:{'Content-Type':'application/json','X-Telegram-Init-Data':tg?.initData||''},...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(savingBrand?120000:25000)});
+    response=await fetch('/api'+path,{method,headers:{'Content-Type':'application/json','X-Telegram-Init-Data':tg?.initData||''},...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(savingBrand||savingStock?120000:25000)});
     data=await response.json();
   }catch(error){
     if(error.name==='AbortError'||error.name==='TimeoutError')throw Error(savingBrand?'Сервер не ответил вовремя. Закройте настройки и откройте их заново, чтобы проверить, сохранились ли изменения.':'Сервер не ответил вовремя. Проверьте подключение и попробуйте снова.');
@@ -357,14 +359,57 @@ function changeOrder(id,status,all){
 }
 function renderAdmin(){
   if(!state.admin){state.view='shipments';render();return;}
-  app.innerHTML=`<div class="page-heading"><div><h1>Управление</h1></div></div><div class="actions"><button class="primary" id="add-brand">+ Добавить бренд</button><button class="secondary" id="all-orders">Все заказы</button><button class="secondary" id="setup-bot">Подключить бота</button><button class="secondary" id="notification-settings">Уведомления в канал</button></div><section class="admin-panel">${state.brands.map(brand=>{const catalog=catalogForBrand(brand.id),count=catalog?.products.filter(p=>!p.hidden&&p.stock>0).length||0;return `<div class="admin-row"><div>${brand.cover?`<img class="admin-brand-cover" src="${esc(brand.cover)}" alt="">`:''}<strong>${esc(brand.name)}</strong><small>${brand.hidden?'Скрыт от покупателей':'Показывается покупателям'}</small><small>${brand.categories.map(esc).join(' · ')}</small><small>${count} товаров${catalog?'':' · Excel ещё не загружен'}</small></div><div class="brand-actions">${catalog?`<button class="secondary" data-brand-prices="${esc(brand.id)}">Цены</button>`:''}<button class="primary" data-brand-import="${esc(brand.id)}">${catalog?'Обновить Excel':'Загрузить Excel'}</button><button class="secondary" data-brand-edit="${esc(brand.id)}">Настройки</button></div></div>`;}).join('')}</section>`;
+  app.innerHTML=`<div class="page-heading"><div><h1>Управление</h1></div></div><div class="actions"><button class="primary" id="add-brand">+ Добавить бренд</button><button class="primary" id="global-stock-sync">Обновить остатки из Excel</button><button class="secondary" id="all-orders">Все заказы</button><button class="secondary" id="setup-bot">Подключить бота</button><button class="secondary" id="notification-settings">Уведомления в канал</button></div><section class="admin-panel">${state.brands.map(brand=>{const catalog=catalogForBrand(brand.id),count=catalog?.products.filter(p=>!p.hidden&&p.stock>0).length||0;return `<div class="admin-row"><div>${brand.cover?`<img class="admin-brand-cover" src="${esc(brand.cover)}" alt="">`:''}<strong>${esc(brand.name)}</strong><small>${brand.hidden?'Скрыт от покупателей':'Показывается покупателям'}</small><small>${brand.categories.map(esc).join(' · ')}</small><small>${count} товаров${catalog?'':' · Excel ещё не загружен'}</small></div><div class="brand-actions">${catalog?`<button class="secondary" data-brand-prices="${esc(brand.id)}">Цены</button>`:''}<button class="primary" data-brand-import="${esc(brand.id)}">${catalog?'Обновить Excel':'Загрузить Excel'}</button><button class="secondary" data-brand-edit="${esc(brand.id)}">Настройки</button></div></div>`;}).join('')}</section>`;
   $('#add-brand').onclick=()=>editBrand();
+  $('#global-stock-sync').onclick=showGlobalStockSync;
   $('#all-orders').onclick=()=>{state.view='all-orders';render();};
   $('#setup-bot').onclick=showBotSetup;
   $('#notification-settings').onclick=showNotifications;
   document.querySelectorAll('[data-brand-import]').forEach(b=>b.onclick=()=>editShipment(catalogForBrand(b.dataset.brandImport),brandById(b.dataset.brandImport)));
   document.querySelectorAll('[data-brand-edit]').forEach(b=>b.onclick=()=>editBrand(brandById(b.dataset.brandEdit)));
   document.querySelectorAll('[data-brand-prices]').forEach(b=>b.onclick=()=>editPrices(brandById(b.dataset.brandPrices)));
+}
+function showGlobalStockSync(){
+  importController?.abort();
+  let parsed=null,preview=null;
+  showDialog('Обновление остатков всех брендов',`<p class="fine-print">Загрузите один Excel со всеми остатками. Сопоставим товары по столбцу «Код» (или «Артикул») во всех брендах. Изменится только количество; названия, цены, фото, категории, видимость и заказы сохранятся.</p><label class="field">Общий Excel (.xls / .xlsx)<input type="file" id="global-stock-file" accept=".xls,.xlsx"></label><div id="global-stock-preview" aria-live="polite"></div><p class="error" id="global-stock-error" role="alert"></p><button class="primary full" id="global-stock-apply" type="button" disabled>Обновить остатки</button>`);
+  const report=$('#global-stock-preview'),error=$('#global-stock-error'),button=$('#global-stock-apply');
+  $('#global-stock-file').onchange=async e=>{
+    const file=e.target.files[0];if(!file)return;
+    importController?.abort();
+    const controller=new AbortController();importController=controller;
+    parsed=null;preview=null;button.disabled=true;error.textContent='';
+    report.innerHTML='<p class="fine-print">Считываем артикулы и остатки, проверяем совпадения во всех брендах…</p>';
+    try{
+      const result=await readStockExcel(file,{signal:controller.signal});
+      if(controller.signal.aborted||!dialog.open)return;
+      const next=await api('/admin/stock/preview','POST',{items:result.items});
+      if(controller.signal.aborted||!dialog.open)return;
+      parsed=result;preview=next;
+      const issues=result.skipped||next.missing;
+      report.innerHTML=`<div class="import-summary">Артикулов в Excel: <strong>${next.source}</strong><br>Совпавших артикулов: <strong>${next.matched}</strong> (карточек: ${next.matchedPositions})<br>Остаток изменится у: <strong>${next.changed}</strong> карточек<br>Без изменений: ${next.unchanged}<br>Не найдены в магазине: ${next.missing}<br>Некорректных строк: ${result.skipped}</div>${next.hidden?`<p class="fine-print">В том числе скрытых карточек: ${next.hidden}. Они останутся скрытыми: инструмент меняет только количество.</p>`:''}${result.warnings.length?`<details class="warning"><summary>Замечания к Excel: ${result.skipped}</summary>${result.warnings.map(w=>`<p>${esc(w)}</p>`).join('')}</details>`:''}${next.missing?`<details class="warning"><summary>Артикулы, которых нет в магазине (${next.missing})</summary><p class="fine-print">${next.missingExamples.map(esc).join(', ')}${next.missing>next.missingExamples.length?' и другие':''}</p></details>`:''}${next.changes.length?`<details class="stock-change-details"><summary>Посмотреть изменения (до 100)</summary><div class="import-preview"><table><thead><tr><th>Бренд / категория</th><th>Артикул</th><th>Было</th><th>Станет</th></tr></thead><tbody>${next.changes.map(c=>`<tr><td>${esc(c.brand)}<br><small>${esc(c.category)}</small></td><td>${esc(c.sku)}</td><td>${c.previous}</td><td><strong>${c.stock}</strong></td></tr>`).join('')}</tbody></table></div></details>`:''}${issues?`<label class="field stock-sync-ack"><input id="global-stock-ack" type="checkbox"> Я проверил пропущенные и не найденные артикулы</label>`:''}`;
+      if(issues)$('#global-stock-ack').onchange=()=>{button.disabled=!$('#global-stock-ack').checked||!next.changed;};
+      else button.disabled=!next.changed;
+      if(!next.matched)error.textContent='Совпадений нет. Остатки не будут изменены.';
+      else if(!next.changed)error.textContent='Все найденные остатки уже актуальны.';
+    }catch(err){
+      if(controller.signal.aborted||!dialog.open)return;
+      parsed=null;preview=null;report.textContent='';error.textContent=err.message;
+    }
+  };
+  button.onclick=async()=>{
+    if(!parsed||!preview||!preview.changed)return;
+    if($('#global-stock-ack')&&!$('#global-stock-ack').checked){error.textContent='Подтвердите проверку замечаний.';return;}
+    button.disabled=true;error.textContent='';button.textContent='Обновляем остатки…';
+    try{
+      const saved=await api('/admin/stock/apply','POST',{items:parsed.items});
+      closeDialog();await refresh();
+      toast(`Готово: остатки обновлены у ${saved.changed} карточек. Остальные данные не менялись.`);
+    }catch(err){
+      if(!dialog.open)return;
+      error.textContent=err.message;button.textContent='Повторить обновление';button.disabled=false;
+    }
+  };
 }
 async function coverFromFile(file){
   if(!/^image\/(png|jpeg|webp)$/.test(file.type)||file.size>15*1024*1024)throw Error('Выберите JPG, PNG или WebP размером до 15 МБ.');

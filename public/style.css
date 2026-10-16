@@ -126,3 +126,8 @@
 .topbar-actions{flex-wrap:wrap;justify-content:flex-end}.minimum-order{font-size:11px;line-height:1.35;max-width:145px;text-align:right}@media(max-width:480px){.topbar{flex-wrap:wrap;gap:8px}.topbar-actions{flex:1}.minimum-order{max-width:125px}}
 
 .category-cover-field{padding:12px 0;border-bottom:1px solid var(--line)}
+
+/* Global Excel stock synchronization in the admin section */
+.stock-change-details{margin:14px 0}
+.stock-sync-ack{display:flex;align-items:flex-start;gap:10px;line-height:1.5}
+.stock-sync-ack input{width:auto;min-height:auto;margin:3px 0 0;flex:none}

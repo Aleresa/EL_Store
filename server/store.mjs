@@ -230,6 +230,44 @@ export class Inventory {
       return shipment;
     });
   }
+  // Stock-only synchronization for all existing brands and categories.
+  // No INSERT/DELETE, no product-data or order changes. "Доступно" is the final visible stock.
+  stockSync(input,apply=false) {
+    if(!input || !Array.isArray(input.items) || !input.items.length || input.items.length>30000)
+      throw new ApiError(400,'В файле должно быть от 1 до 30 000 остатков.');
+    const desired=new Map();
+    for(const item of input.items){
+      const sku=typeof item?.sku==='string'?item.sku.trim():'',stock=item?.stock;
+      if(!validId(sku)||!Number.isSafeInteger(stock)||stock<0||stock>10000000)
+        throw new ApiError(400,'Некорректный артикул или остаток в Excel.');
+      if(desired.has(sku))throw new ApiError(400,`Повтор артикула ${sku}. Исправьте Excel.`);
+      desired.set(sku,stock);
+    }
+    const perform=()=>{
+      const brands=new Map(this.rows("SELECT id,json_extract(data,'$.name') AS name FROM brands").map(r=>[r.id,r.name]));
+      const matched=new Set(),changes=[];
+      let matchedPositions=0,unchanged=0,hidden=0;
+      // JSON values (particularly product images) are never loaded during stock sync.
+      const rows=this.rows("SELECT shipment,id,json_extract(data,'$.sku') AS sku,json_extract(data,'$.name') AS name,json_extract(data,'$.group') AS category,json_extract(data,'$.hidden') AS hidden,total,placed FROM products");
+      for(const row of rows){
+        const sku=String(row.sku||row.id).trim();
+        if(!desired.has(sku))continue;
+        matched.add(sku);matchedPositions++;
+        if(row.hidden)hidden++;
+        const stock=desired.get(sku),previous=row.total-row.placed;
+        if(stock===previous){unchanged++;continue;}
+        const newTotal=stock+row.placed;
+        if(newTotal>10000000)throw new ApiError(400,`Слишком большой остаток ${sku} с учётом оформленных заказов.`);
+        if(changes.length<100)changes.push({sku,name:row.name,brand:brands.get(row.shipment)||row.shipment,category:row.category||'',previous,stock,hidden:Boolean(row.hidden)});
+        if(apply)this.sql.exec('UPDATE products SET total=? WHERE shipment=? AND id=?',newTotal,row.shipment,row.id);
+      }
+      const missing=[...desired.keys()].filter(sku=>!matched.has(sku));
+      if(apply&&!matched.size)throw new ApiError(400,'Совпадающих артикулов нет. Ничего не изменено.');
+      return {source:desired.size,matched:matched.size,matchedPositions,changed:matchedPositions-unchanged,unchanged,
+        hidden,missing:missing.length,missingExamples:missing.slice(0,25),changes,applied:apply};
+    };
+    return apply?this.transaction(perform):perform();
+  }
   normalizeLines(input,fallback) {
     if(!Array.isArray(input.lines)||!input.lines.length||input.lines.length>100)throw new ApiError(400,'Выберите от 1 до 100 позиций.');
     const seen=new Set();

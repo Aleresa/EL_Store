@@ -112,6 +112,14 @@ export class NewsletterStore {
         if(!admin)throw new ApiError(403,'Раздел доступен только владельцу.');
         return json(this.inventory.deleteShipment(path.split('/').pop()));
       }
+      if(path==='/api/admin/stock/preview'&&request.method==='POST'){
+        if(!admin)throw new ApiError(403,'Раздел доступен только владельцу.');
+        return json(this.inventory.stockSync(await readJson(request),false));
+      }
+      if(path==='/api/admin/stock/apply'&&request.method==='POST'){
+        if(!admin)throw new ApiError(403,'Раздел доступен только владельцу.');
+        return json(this.inventory.stockSync(await readJson(request),true));
+      }
       if(path==='/api/admin/shipments' && request.method==='POST') {
         if(!admin) throw new ApiError(403,'Раздел доступен только владельцу.');
         return json({shipment:this.inventory.importShipment(await readJson(request))});
